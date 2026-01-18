@@ -1,0 +1,88 @@
+[package]
+name = "caut"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Coding Agent Usage Tracker - CLI for monitoring LLM provider usage"
+license = "MIT"
+repository = "https://github.com/Dicklesworthstone/coding_agent_usage_tracker"
+keywords = ["cli", "llm", "usage", "tracking", "codex", "claude"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "caut"
+path = "src/main.rs"
+
+[dependencies]
+# CLI argument parsing
+clap = { version = "4.5.54", features = ["derive", "env"] }
+clap_complete = "4.5.44"
+
+# Serialization
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.140"
+toml = "0.8"
+
+# Error handling
+anyhow = "1.0.100"
+thiserror = "2.0.17"
+
+# Async runtime + HTTP
+tokio = { version = "1.44", features = ["full"] }
+reqwest = { version = "0.13.1", features = ["json", "webpki-roots"] }
+
+# Date/time
+chrono = { version = "0.4.42", features = ["serde"] }
+
+# Platform paths and secrets
+directories = "6.0.0"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native"] }
+
+# Terminal output - using rich_rust (local port of Python Rich)
+rich_rust = { path = "/dp/rich_rust", features = ["full"] }
+crossterm = "0.29.0"
+colored = "3.1.0"
+
+# Logging
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
+which = "8.0.0"
+futures = "0.3.31"
+
+# Test utilities (optional)
+tempfile = { version = "3.15", optional = true }
+
+[build-dependencies]
+# Note: vergen-gix 9.1 requires Rust 1.88+; using 9.1 to match build.rs API
+vergen-gix = { version = "9.1", features = ["build", "cargo", "rustc"] }
+
+[features]
+default = []
+# Expose test utilities for integration tests
+test-utils = ["tempfile"]
+
+[dev-dependencies]
+tempfile = "3.15"
+jsonschema = "0.28"
+wiremock = "0.6"
+tokio-test = "0.4"
+assert_cmd = "2.0"
+predicates = "3.1"
+caut = { path = ".", features = ["test-utils"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[lints.rust]
+# deny (not forbid) allows tests to use #[allow(unsafe_code)] for env var manipulation
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow async functions without await - stub functions will use async when implemented
+unused_async = "allow"
