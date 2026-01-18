@@ -1,0 +1,233 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run nightly at 3am UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  # Disable incremental compilation for CI (more reproducible builds)
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-integration-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Create test artifacts directory
+        run: mkdir -p test-logs/artifacts
+
+      - name: Build project with test features
+        run: cargo build --all-features
+
+      - name: Run integration tests
+        run: |
+          cargo nextest run \
+            --features test-utils \
+            --test provider_render_pipeline_test \
+            --test schema_contract_test \
+            --test fixtures_test \
+            --test http_client_test \
+            --no-fail-fast \
+            --test-threads=4 \
+            --retries 2 \
+            2>&1 | tee test-logs/integration_tests.log
+        env:
+          RUST_LOG: debug
+          RUST_BACKTRACE: 1
+
+      - name: Run E2E tests
+        run: |
+          cargo nextest run \
+            --features test-utils \
+            --test e2e_usage_test \
+            --test e2e_cost_test \
+            --no-fail-fast \
+            --test-threads=2 \
+            --retries 1 \
+            2>&1 | tee test-logs/e2e_tests.log
+        env:
+          RUST_LOG: info
+          RUST_BACKTRACE: 1
+          # Ensure no color codes in test output
+          NO_COLOR: 1
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## Integration Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Test Logs" >> $GITHUB_STEP_SUMMARY
+          if [ -f test-logs/integration_tests.log ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 test-logs/integration_tests.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### E2E Test Logs" >> $GITHUB_STEP_SUMMARY
+          if [ -f test-logs/e2e_tests.log ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 test-logs/e2e_tests.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-artifacts
+          path: |
+            test-logs/
+          retention-days: 14
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-logs
+          path: |
+            test-logs/*.log
+          retention-days: 7
+
+  # Separate job for mock server tests (if needed in the future)
+  mock-server-tests:
+    name: Mock Server Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [integration]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-mock-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-mock-
+            ${{ runner.os }}-cargo-
+
+      - name: Run HTTP client tests with wiremock
+        run: |
+          cargo test \
+            --features test-utils \
+            --test http_client_test \
+            -- --test-threads=1
+        env:
+          RUST_LOG: debug
+          RUST_BACKTRACE: 1
+
+  # Nightly-only: Extended integration testing
+  extended-integration:
+    name: Extended Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-extended-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-extended-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-nextest and llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest,cargo-llvm-cov
+
+      - name: Create test artifacts directory
+        run: mkdir -p test-logs/artifacts
+
+      - name: Run all integration tests with coverage
+        run: |
+          cargo llvm-cov nextest \
+            --all-features \
+            --lcov --output-path integration-lcov.info \
+            --test provider_render_pipeline_test \
+            --test schema_contract_test \
+            --test fixtures_test \
+            --test http_client_test \
+            --test e2e_usage_test \
+            --test e2e_cost_test \
+            --no-fail-fast \
+            --test-threads=4 \
+            2>&1 | tee test-logs/extended_integration.log
+        env:
+          RUST_LOG: debug
+          RUST_BACKTRACE: full
+
+      - name: Upload extended test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: extended-integration-artifacts
+          path: |
+            test-logs/
+            integration-lcov.info
+          retention-days: 30
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: integration-lcov.info
+          flags: integration
+          fail_ci_if_error: false
+          verbose: true

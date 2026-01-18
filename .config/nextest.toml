@@ -1,0 +1,29 @@
+# nextest configuration for caut
+# See: https://nexte.st/book/configuration.html
+
+[profile.default]
+# Default profile settings
+retries = 0
+fail-fast = true
+
+[profile.ci]
+# CI profile with JUnit XML output and retries
+retries = 1
+fail-fast = false
+slow-timeout = { period = "60s" }
+
+[profile.ci.junit]
+# Generate JUnit XML for GitHub Actions test summary
+path = "test-results/e2e-junit.xml"
+report-name = "caut-e2e-tests"
+
+[profile.e2e]
+# E2E test profile with extended timeouts
+retries = 1
+fail-fast = false
+slow-timeout = { period = "120s" }
+test-threads = 2
+
+[profile.e2e.junit]
+path = "test-results/e2e-junit.xml"
+report-name = "caut-e2e-tests"
