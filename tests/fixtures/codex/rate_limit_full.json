@@ -1,0 +1,41 @@
+{
+  "rate_limit": {
+    "primary": {
+      "used_percent": 28.0,
+      "remaining_percent": 72.0,
+      "window_minutes": 180,
+      "resets_at": "2026-01-18T14:15:00Z",
+      "reset_description": "resets in 2h 15m"
+    },
+    "secondary": {
+      "used_percent": 59.0,
+      "remaining_percent": 41.0,
+      "window_minutes": 10080,
+      "resets_at": "2026-01-24T09:00:00Z",
+      "reset_description": "resets Fri 9am"
+    }
+  },
+  "credits": {
+    "remaining": 112.4,
+    "events": [
+      {
+        "amount": 100.0,
+        "event_type": "purchase",
+        "timestamp": "2025-12-18T00:00:00Z",
+        "description": "Monthly credit purchase"
+      },
+      {
+        "amount": -12.6,
+        "event_type": "usage",
+        "timestamp": "2026-01-17T23:00:00Z",
+        "description": "API usage"
+      }
+    ],
+    "updated_at": "2026-01-18T12:00:00Z"
+  },
+  "identity": {
+    "account_email": "user@example.com",
+    "account_organization": "Personal",
+    "login_method": "google"
+  }
+}

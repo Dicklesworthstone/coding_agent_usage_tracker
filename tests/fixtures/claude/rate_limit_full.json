@@ -1,0 +1,30 @@
+{
+  "rate_limit": {
+    "primary": {
+      "used_percent": 30.0,
+      "remaining_percent": 70.0,
+      "window_minutes": 180,
+      "resets_at": "2026-01-18T14:00:00Z",
+      "reset_description": "resets in 2h"
+    },
+    "secondary": {
+      "used_percent": 15.0,
+      "remaining_percent": 85.0,
+      "window_minutes": 10080,
+      "resets_at": "2026-01-20T00:00:00Z",
+      "reset_description": "resets Mon 12:00 AM"
+    },
+    "tertiary": {
+      "used_percent": 8.0,
+      "remaining_percent": 92.0,
+      "window_minutes": 10080,
+      "resets_at": "2026-01-20T00:00:00Z",
+      "reset_description": "Opus/Sonnet tier"
+    }
+  },
+  "identity": {
+    "account_email": "user@example.com",
+    "account_organization": "Anthropic",
+    "login_method": "oauth"
+  }
+}

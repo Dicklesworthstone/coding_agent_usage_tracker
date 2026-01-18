@@ -1,0 +1,14 @@
+{
+  "error": {
+    "type": "server_error",
+    "message": "Internal server error",
+    "code": 500,
+    "provider": "claude",
+    "response": {
+      "error": {
+        "type": "api_error",
+        "message": "An unexpected error occurred. Please try again later."
+      }
+    }
+  }
+}

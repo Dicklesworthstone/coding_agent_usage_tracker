@@ -1,0 +1,22 @@
+[
+  {
+    "date": "2026-01-18",
+    "input_tokens": 3500,
+    "output_tokens": 1300,
+    "cache_read_tokens": null,
+    "cache_creation_tokens": null,
+    "total_tokens": 4800,
+    "total_cost": 0.108,
+    "models_used": ["gpt-4-turbo"]
+  },
+  {
+    "date": "2026-01-17",
+    "input_tokens": 1000,
+    "output_tokens": 300,
+    "cache_read_tokens": null,
+    "cache_creation_tokens": null,
+    "total_tokens": 1300,
+    "total_cost": 0.048,
+    "models_used": ["gpt-4"]
+  }
+]

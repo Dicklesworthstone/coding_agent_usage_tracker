@@ -1,0 +1,12 @@
+{
+  "rate_limit": {
+    "primary": {
+      "used_percent": 50.0,
+      "remaining_percent": 50.0,
+      "window_minutes": 180
+    }
+  },
+  "identity": {
+    "account_email": "partial@example.com"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "providers": {
+    "claude": {
+      "version": 1,
+      "accounts": [
+        {
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "label": "personal",
+          "token": "sk-ant-test-token-personal",
+          "addedAt": "2026-01-01T00:00:00Z",
+          "lastUsed": "2026-01-18T10:00:00Z"
+        }
+      ],
+      "activeIndex": 0
+    }
+  }
+}

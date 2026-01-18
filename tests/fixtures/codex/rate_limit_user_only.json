@@ -1,0 +1,7 @@
+{
+  "identity": {
+    "account_email": "user-only@example.com",
+    "account_organization": "Minimal Org",
+    "login_method": "email"
+  }
+}

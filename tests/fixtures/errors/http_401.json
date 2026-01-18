@@ -1,0 +1,14 @@
+{
+  "error": {
+    "type": "unauthorized",
+    "message": "Invalid API key",
+    "code": 401,
+    "provider": "claude",
+    "response": {
+      "error": {
+        "type": "authentication_error",
+        "message": "Invalid API key provided"
+      }
+    }
+  }
+}

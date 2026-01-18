@@ -1,0 +1,9 @@
+{
+  "error": {
+    "type": "timeout",
+    "message": "Request timed out after 30 seconds",
+    "code": "ETIMEDOUT",
+    "provider": "claude",
+    "strategy": "claude-oauth"
+  }
+}

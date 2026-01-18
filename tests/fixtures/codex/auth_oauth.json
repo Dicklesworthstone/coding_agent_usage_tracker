@@ -1,0 +1,9 @@
+{
+  "last_refresh": "2026-01-18T10:00:00.000Z",
+  "tokens": {
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfcGxhbl90eXBlIjoicHJvIiwiY2hhdGdwdF9zdWJzY3JpcHRpb25fYWN0aXZlX3VudGlsIjoiMjAyNi0wMi0wMVQwMDowMDowMFoiLCJvcmdhbml6YXRpb25zIjpbeyJ0aXRsZSI6IlBlcnNvbmFsIiwiaXNfZGVmYXVsdCI6dHJ1ZX1dfX0.sig",
+    "access_token": "acc_test_token_xxxxxxxx",
+    "refresh_token": "ref_test_token_xxxxxxxx",
+    "account_id": "acct_test_123456"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "last_computed_date": "2026-01-18",
+  "daily": [
+    {
+      "date": "2026-01-18",
+      "input_tokens": 100000,
+      "output_tokens": 24500,
+      "cache_read_tokens": 5000,
+      "cache_creation_tokens": 1000,
+      "total_tokens": 130500,
+      "total_cost": 2.45,
+      "models_used": ["claude-3-opus-20240229", "claude-3-sonnet-20240229"]
+    },
+    {
+      "date": "2026-01-17",
+      "input_tokens": 80000,
+      "output_tokens": 20000,
+      "cache_read_tokens": 2000,
+      "cache_creation_tokens": 500,
+      "total_tokens": 102500,
+      "total_cost": 1.95,
+      "models_used": ["claude-3-sonnet-20240229"]
+    }
+  ],
+  "totals": {
+    "input_tokens": 1800000,
+    "output_tokens": 600000,
+    "cache_read_tokens": 50000,
+    "cache_creation_tokens": 10000,
+    "total_tokens": 2460000,
+    "total_cost": 47.82
+  }
+}

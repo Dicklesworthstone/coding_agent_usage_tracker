@@ -1,0 +1,2 @@
+Rate limit: 45% remaining (resets in 2h)
+Account: legacy@example.com

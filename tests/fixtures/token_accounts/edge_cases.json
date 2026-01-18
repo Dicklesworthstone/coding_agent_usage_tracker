@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "providers": {
+    "claude": {
+      "version": 1,
+      "accounts": [
+        {
+          "id": "550e8400-e29b-41d4-a716-446655440001",
+          "label": "",
+          "token": "sk-ant-empty-label",
+          "addedAt": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "activeIndex": 0
+    },
+    "codex": {
+      "version": 1,
+      "accounts": [],
+      "activeIndex": 0
+    },
+    "zai": {
+      "version": 1,
+      "accounts": [
+        {
+          "id": "770e8400-e29b-41d4-a716-446655440001",
+          "label": "test",
+          "token": "zai-test-token",
+          "addedAt": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "activeIndex": 5
+    }
+  }
+}

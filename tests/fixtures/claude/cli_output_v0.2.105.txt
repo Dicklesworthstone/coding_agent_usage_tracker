@@ -1,0 +1,9 @@
+Claude CLI v0.2.105
+
+Rate Limits:
+  Session limit: 70% remaining (resets in 2h 15m)
+  Weekly limit: 85% remaining (resets Mon 12:00 AM)
+  Opus/Sonnet tier: 92% remaining
+
+Account: user@example.com
+Status: Active

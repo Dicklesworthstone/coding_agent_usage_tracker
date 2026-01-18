@@ -1,0 +1,5 @@
+{"timestamp": "2026-01-18T10:30:00Z", "type": "message", "payload": {}}
+not valid json at all
+{"timestamp": "2026-01-18T10:31:00Z", "type": "response", "payload": {}}
+
+{"timestamp": "2026-01-18T10:32:00Z", "type": "message", "payload": {}}

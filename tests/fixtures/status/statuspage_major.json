@@ -1,0 +1,12 @@
+{
+  "page": {
+    "id": "sfc5pnldw4hc",
+    "name": "OpenAI",
+    "url": "https://status.openai.com"
+  },
+  "status": {
+    "indicator": "major",
+    "description": "Major Service Disruption"
+  },
+  "updated_at": "2026-01-18T12:00:00Z"
+}

@@ -1,0 +1,31 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-01-18T11:30:00.000Z",
+      "type": "completion",
+      "model": "gpt-4-turbo",
+      "input_tokens": 1500,
+      "output_tokens": 500,
+      "total_tokens": 2000,
+      "cost_usd": 0.045
+    },
+    {
+      "timestamp": "2026-01-18T10:15:00.000Z",
+      "type": "completion",
+      "model": "gpt-4-turbo",
+      "input_tokens": 2000,
+      "output_tokens": 800,
+      "total_tokens": 2800,
+      "cost_usd": 0.063
+    },
+    {
+      "timestamp": "2026-01-17T16:45:00.000Z",
+      "type": "completion",
+      "model": "gpt-4",
+      "input_tokens": 1000,
+      "output_tokens": 300,
+      "total_tokens": 1300,
+      "cost_usd": 0.048
+    }
+  ]
+}

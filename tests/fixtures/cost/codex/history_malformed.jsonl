@@ -1,0 +1,5 @@
+{"session_id": "sess_001", "ts": 1737194400, "text": "Valid line"}
+{"session_id": "sess_002" ts: invalid json here
+{"session_id": "sess_003", "ts": 1737194500, "text": "Another valid line"}
+not json at all
+{"session_id": "sess_004", "ts": 1737194600, "text": "Final valid line"}

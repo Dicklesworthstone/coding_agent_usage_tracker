@@ -1,0 +1,5 @@
+{"timestamp": "2026-01-18T10:30:00Z", "type": "message", "payload": {"text": "Hello"}}
+{"timestamp": "2026-01-18T10:31:00Z", "type": "response", "payload": {"text": "Hi there"}}
+{"timestamp": "2026-01-18T10:32:00Z", "type": "message", "payload": {"text": "How are you?"}}
+{"timestamp": "2026-01-17T14:00:00Z", "type": "message", "payload": {"text": "Previous day"}}
+{"timestamp": "2026-01-17T14:01:00Z", "type": "response", "payload": {"text": "Response"}}

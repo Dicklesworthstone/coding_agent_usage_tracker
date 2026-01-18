@@ -1,0 +1,10 @@
+{
+  "credits": {
+    "remaining": 50.0,
+    "events": [],
+    "updated_at": "2026-01-18T12:00:00Z"
+  },
+  "identity": {
+    "account_email": "credits@example.com"
+  }
+}

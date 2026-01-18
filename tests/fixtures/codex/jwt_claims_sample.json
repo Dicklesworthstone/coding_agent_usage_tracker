@@ -1,0 +1,26 @@
+{
+  "email": "user@example.com",
+  "email_verified": true,
+  "https://api.openai.com/auth": {
+    "chatgpt_account_id": "acct_abc123",
+    "chatgpt_plan_type": "pro",
+    "chatgpt_user_id": "user_xyz789",
+    "chatgpt_subscription_active_start": "2026-01-01T00:00:00Z",
+    "chatgpt_subscription_active_until": "2026-02-01T00:00:00Z",
+    "chatgpt_subscription_last_checked": "2026-01-18T10:00:00Z",
+    "organizations": [
+      {
+        "id": "org_personal",
+        "title": "Personal",
+        "role": "owner",
+        "is_default": true
+      },
+      {
+        "id": "org_work",
+        "title": "Work Organization",
+        "role": "member",
+        "is_default": false
+      }
+    ]
+  }
+}

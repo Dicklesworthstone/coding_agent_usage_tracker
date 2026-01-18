@@ -1,0 +1,20 @@
+{
+  "page": {
+    "id": "sfc5pnldw4hc",
+    "name": "OpenAI",
+    "url": "https://status.openai.com"
+  },
+  "status": {
+    "indicator": "maintenance",
+    "description": "Scheduled Maintenance In Progress"
+  },
+  "scheduled_maintenances": [
+    {
+      "name": "Database Migration",
+      "status": "in_progress",
+      "scheduled_for": "2026-01-18T10:00:00Z",
+      "scheduled_until": "2026-01-18T14:00:00Z"
+    }
+  ],
+  "updated_at": "2026-01-18T12:00:00Z"
+}

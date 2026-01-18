@@ -1,0 +1,14 @@
+{
+  "error": {
+    "type": "forbidden",
+    "message": "Access denied",
+    "code": 403,
+    "provider": "claude",
+    "response": {
+      "error": {
+        "type": "permission_error",
+        "message": "Your API key does not have permission to access this resource"
+      }
+    }
+  }
+}

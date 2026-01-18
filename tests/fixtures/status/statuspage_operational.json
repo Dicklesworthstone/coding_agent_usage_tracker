@@ -1,0 +1,12 @@
+{
+  "page": {
+    "id": "sfc5pnldw4hc",
+    "name": "OpenAI",
+    "url": "https://status.openai.com"
+  },
+  "status": {
+    "indicator": "none",
+    "description": "All Systems Operational"
+  },
+  "updated_at": "2026-01-18T12:00:00Z"
+}
