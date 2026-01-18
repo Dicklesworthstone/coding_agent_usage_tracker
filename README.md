@@ -1,26 +1,28 @@
-# caut
+<p align="center">
+  <img src="caut_illustration.webp" alt="caut - Coding Agent Usage Tracker" width="800">
+</p>
 
-```
-   ______  ___   __  __  ______
-  / ____/ /   | / / / / /_  __/
- / /     / /| |/ / / /   / /
-/ /___  / ___ / /_/ /   / /
-\____/ /_/  |_\____/   /_/
+<h1 align="center">caut</h1>
 
-Coding Agent Usage Tracker
-```
+<p align="center">
+  <strong>Coding Agent Usage Tracker — monitor LLM provider usage from a single CLI</strong>
+</p>
 
-[![CI](https://github.com/Dicklesworthstone/coding_agent_usage_tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Dicklesworthstone/coding_agent_usage_tracker/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <a href="https://github.com/Dicklesworthstone/coding_agent_usage_tracker/actions/workflows/ci.yml"><img src="https://github.com/Dicklesworthstone/coding_agent_usage_tracker/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange.svg" alt="Rust 1.88+"></a>
+</p>
 
-**Track LLM provider usage across all your AI coding tools from a single CLI.**
+---
+
+## Quick Install
 
 ```bash
-# Install
+# From source (recommended)
 cargo install --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
 
-# Quick check
+# Then run
 caut usage
 ```
 
@@ -30,30 +32,17 @@ caut usage
 
 ### The Problem
 
-You're using multiple AI coding assistants—Codex, Claude, Gemini, Cursor, Copilot—each with different rate limits, credits, and usage dashboards. Tracking your remaining quota across all of them means opening 5+ browser tabs, remembering different login flows, and mentally aggregating the data.
+You're using multiple AI coding assistants—Codex, Claude, Gemini, Cursor, Copilot—each with different rate limits, credits, and usage dashboards. Tracking your remaining quota means:
+
+- Opening 5+ browser tabs
+- Remembering different login flows
+- Mentally aggregating disparate data formats
 
 ### The Solution
 
-**caut** (Coding Agent Usage Tracker) fetches usage data from 16+ LLM providers through a single CLI. Human-readable tables for your terminal, or structured JSON/Markdown for your AI agents to consume.
-
-### Why caut?
-
-| Feature | caut | Manual Checking |
-|---------|------|-----------------|
-| **Single command** | `caut usage --provider all` | Open 5+ dashboards |
-| **Rate limit tracking** | Session + weekly + opus tiers | Mental math |
-| **Credits monitoring** | Real-time balance | Refresh each page |
-| **Status awareness** | Provider outage alerts | Check status pages |
-| **Robot mode** | JSON/Markdown for agents | N/A |
-| **Cross-platform** | macOS, Linux, Windows | Browser-only |
-| **Cost tracking** | Local JSONL scanning | Export CSVs manually |
-
----
-
-## Quick Example
+**caut** fetches usage data from **16+ LLM providers** through a single CLI command. Human-readable tables for your terminal, or structured JSON/Markdown for AI agents to consume.
 
 ```bash
-# Show usage for primary providers (Codex + Claude)
 $ caut usage
 
 ╭─ Codex (openai-web) ─────────────────────────────────────╮
@@ -70,53 +59,96 @@ $ caut usage
 │ Opus     45% left   [====--------]  separate tier        │
 │ Account  claude@example.com                              │
 ╰──────────────────────────────────────────────────────────╯
-
-# JSON for your AI agent
-$ caut usage --json --provider all
-
-# Cost tracking
-$ caut cost --provider claude
-
-Claude Cost (local)
-Today:        $2.45 · 124,500 tokens
-Last 30 days: $47.82 · 2.4M tokens
-
-# Include provider status
-$ caut usage --status
 ```
+
+### Why caut?
+
+| Feature | caut | Manual Checking |
+|---------|------|-----------------|
+| **Single command** | `caut usage --provider all` | Open 5+ dashboards |
+| **Rate limit tracking** | Session + weekly + opus tiers | Mental math |
+| **Credits monitoring** | Real-time balance | Refresh each page |
+| **Status awareness** | Provider outage alerts | Check status pages |
+| **Robot mode** | JSON/Markdown for agents | N/A |
+| **Cross-platform** | macOS, Linux, Windows | Browser-only |
+| **Cost tracking** | Local JSONL scanning | Export CSVs manually |
+
+---
+
+## AGENTS.md
+
+This project includes an [`AGENTS.md`](AGENTS.md) file with detailed guidelines for AI coding agents. If you're an AI assistant working on this codebase, read that file for:
+
+- Toolchain requirements (Rust 2024, nightly)
+- Code editing discipline and patterns
+- Testing and CI/CD requirements
+- Multi-agent coordination via MCP Agent Mail
+- Beads workflow integration
 
 ---
 
 ## Design Philosophy
 
 ### 1. Dual-Mode Output
-Human mode uses rich terminal formatting with colored bars and panels. Robot mode emits stable JSON/Markdown schemas designed for token efficiency when consumed by AI agents.
+
+Human mode uses **rich terminal formatting** with colored bars, panels, and progress indicators. Robot mode emits **stable JSON/Markdown schemas** designed for token efficiency when consumed by AI agents.
+
+```bash
+# Human mode (default)
+caut usage
+
+# Robot mode for AI agents
+caut usage --json
+caut usage --format md
+```
 
 ### 2. Provider Abstraction
-Each of the 16 providers has a descriptor with metadata, branding, and fetch strategies. Adding a new provider means implementing one trait, not touching core logic.
+
+Each of the 16 providers has a **descriptor** with metadata, branding, and fetch strategies. Adding a new provider means implementing one trait—not touching core logic.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Provider Registry                      │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐       │
+│  │  Codex  │ │ Claude  │ │ Gemini  │ │   ...   │       │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘       │
+└─────────────────────────────────────────────────────────┘
+```
 
 ### 3. Fail Gracefully
-Network timeouts, missing credentials, and provider outages are all handled with clear error messages and partial results—never crash, always inform.
+
+Network timeouts, missing credentials, and provider outages are handled with **clear error messages and partial results**—never crash, always inform.
 
 ### 4. Zero Configuration
+
 Works out of the box by detecting installed CLI tools and browser cookies. Optional config file for power users who want to customize behavior.
 
 ### 5. CodexBar Parity
+
 A faithful port of [CodexBar](https://github.com/steipete/codexbar)'s CLI functionality to cross-platform Rust, preserving all commands, flags, and output formats.
 
 ---
 
-## Comparison vs Alternatives
+## Comparison
 
 | Feature | caut | CodexBar | Manual |
 |---------|------|----------|--------|
-| Platform | macOS, Linux, Windows | macOS only | Any |
-| Language | Rust | Swift | N/A |
-| Providers | 16 | 16 | 1 per tab |
-| Robot mode | JSON + Markdown | JSON | None |
-| Installation | Single binary | App bundle | N/A |
-| Menu bar UI | No (CLI only) | Yes | No |
-| Memory usage | ~10MB | ~50MB | Varies |
+| **Platform** | macOS, Linux, Windows | macOS only | Any |
+| **Language** | Rust | Swift | N/A |
+| **Providers** | 16+ | 16 | 1 per tab |
+| **Robot mode** | JSON + Markdown | JSON | None |
+| **Installation** | Single binary | App bundle | N/A |
+| **Menu bar UI** | No (CLI only) | Yes | No |
+| **Memory usage** | ~10MB | ~50MB | Varies |
+| **Startup time** | ~10ms | ~500ms | N/A |
+
+---
+
+## Origins
+
+**caut** is a cross-platform Rust port of [CodexBar](https://github.com/steipete/codexbar) by Peter Steinberger. CodexBar is a beautiful macOS menu bar app for tracking AI coding tool usage. caut brings that functionality to the command line, running anywhere Rust compiles.
+
+**Author:** [Jeffrey Emanuel](https://github.com/Dicklesworthstone)
 
 ---
 
@@ -125,13 +157,12 @@ A faithful port of [CodexBar](https://github.com/steipete/codexbar)'s CLI functi
 ### From Source (Recommended)
 
 ```bash
-# Clone and build
 git clone https://github.com/Dicklesworthstone/coding_agent_usage_tracker
 cd coding_agent_usage_tracker
 cargo install --path .
 ```
 
-### From Cargo
+### From Git
 
 ```bash
 cargo install --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
@@ -139,8 +170,17 @@ cargo install --git https://github.com/Dicklesworthstone/coding_agent_usage_trac
 
 ### Requirements
 
-- **Rust 1.88+** (nightly for edition 2024)
-- **OpenSSL** (Linux only, for TLS)
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| **Rust** | 1.88+ | Nightly required for edition 2024 |
+| **OpenSSL** | Any | Linux only, for TLS |
+
+### Verify Installation
+
+```bash
+caut --version
+# caut 0.1.0 (abc1234 2026-01-18)
+```
 
 ---
 
@@ -152,7 +192,7 @@ cargo install --git https://github.com/Dicklesworthstone/coding_agent_usage_trac
 # Primary providers (Codex + Claude)
 caut usage
 
-# All providers
+# All configured providers
 caut usage --provider all
 
 # Specific provider
@@ -172,7 +212,7 @@ caut cost --refresh
 ### 3. Robot Mode for AI Agents
 
 ```bash
-# JSON output
+# Compact JSON (one line)
 caut usage --json
 
 # Pretty-printed JSON
@@ -201,8 +241,9 @@ Prints quickstart help with top commands and examples.
 
 Show rate limit usage for selected providers.
 
-```bash
-caut usage [OPTIONS]
+```
+USAGE:
+    caut usage [OPTIONS]
 
 OPTIONS:
     --provider <NAME|both|all>  Provider selection (default: both)
@@ -220,8 +261,9 @@ OPTIONS:
 
 Show local cost usage from JSONL logs.
 
-```bash
-caut cost [OPTIONS]
+```
+USAGE:
+    caut cost [OPTIONS]
 
 OPTIONS:
     --provider <NAME|both|all>  Provider selection (default: both)
@@ -232,14 +274,15 @@ OPTIONS:
 
 Manage multi-account configurations.
 
-```bash
-caut token-accounts list [--provider <NAME>]
-caut token-accounts convert --from <FORMAT> --to <FORMAT>
+```
+USAGE:
+    caut token-accounts list [--provider <NAME>]
+    caut token-accounts convert --from <FORMAT> --to <FORMAT>
 ```
 
 ### Global Options
 
-```bash
+```
 --format <human|json|md>  Output format (default: human)
 --json                    Shorthand for --format json
 --pretty                  Pretty-print JSON
@@ -248,6 +291,45 @@ caut token-accounts convert --from <FORMAT> --to <FORMAT>
 --json-output             Emit JSONL logs to stderr
 -v, --verbose             Enable debug logging
 ```
+
+---
+
+## Supported Providers
+
+| Provider | CLI Name | Source Types | Features |
+|----------|----------|--------------|----------|
+| **Codex** | `codex` | web, cli | Session, weekly, credits |
+| **Claude** | `claude` | oauth, web, cli | Chat, weekly, opus tier |
+| **Gemini** | `gemini` | oauth | Session, weekly |
+| **Cursor** | `cursor` | web | Session limits |
+| **Copilot** | `copilot` | api | Request limits |
+| **z.ai** | `zai` | api | Token limits |
+| **MiniMax** | `minimax` | api, web | Usage tracking |
+| **Kimi** | `kimi` | api | Token limits |
+| **Kimi K2** | `kimik2` | api | Token limits |
+| **Kiro** | `kiro` | cli | Session limits |
+| **Vertex AI** | `vertexai` | oauth | Quota tracking |
+| **JetBrains AI** | `jetbrains` | local | Local file |
+| **Antigravity** | `antigravity` | local | Local probe |
+| **OpenCode** | `opencode` | web | Cookie auth |
+| **Factory** | `factory` | web | Cookie auth |
+| **Amp** | `amp` | web | Cookie auth |
+
+---
+
+## Data Sources
+
+caut uses multiple strategies to fetch usage data:
+
+| Source | How it works | Platform |
+|--------|--------------|----------|
+| **CLI** | Invokes provider CLI via PTY | All |
+| **Web** | Reads browser cookies | macOS |
+| **OAuth** | Uses stored tokens | All |
+| **API** | Direct API calls | All |
+| **Local** | Scans local JSONL logs | All |
+
+Priority order: CLI → Web → OAuth → API → Local (configurable via `--source`)
 
 ---
 
@@ -309,30 +391,11 @@ Multi-account support uses `token-accounts.json`:
 
 ---
 
-## Supported Providers
-
-| Provider | CLI Name | Source Types | Features |
-|----------|----------|--------------|----------|
-| **Codex** | `codex` | web, cli | Session, weekly, credits |
-| **Claude** | `claude` | oauth, web, cli | Chat, weekly, opus tier |
-| **Gemini** | `gemini` | oauth | Session, weekly |
-| **Cursor** | `cursor` | web | Session limits |
-| **Copilot** | `copilot` | api | Request limits |
-| **z.ai** | `zai` | api | Token limits |
-| **MiniMax** | `minimax` | api, web | Usage tracking |
-| **Kimi** | `kimi` | api | Token limits |
-| **Kimi K2** | `kimik2` | api | Token limits |
-| **Kiro** | `kiro` | cli | Session limits |
-| **Vertex AI** | `vertexai` | oauth | Quota tracking |
-| **JetBrains AI** | `jetbrains` | local | Local file |
-| **Antigravity** | `antigravity` | local | Local probe |
-| **OpenCode** | `opencode` | web | Cookie auth |
-| **Factory** | `factory` | web | Cookie auth |
-| **Amp** | `amp` | web | Cookie auth |
-
----
-
 ## JSON Output Schema
+
+### Schema Version
+
+All JSON output includes `schemaVersion: "caut.v1"` for forward compatibility.
 
 ### Usage Response
 
@@ -341,7 +404,7 @@ Multi-account support uses `token-accounts.json`:
   "schemaVersion": "caut.v1",
   "generatedAt": "2026-01-18T12:00:00Z",
   "command": "usage",
-  "providers": [
+  "data": [
     {
       "provider": "codex",
       "account": "user@example.com",
@@ -383,7 +446,6 @@ Multi-account support uses `token-accounts.json`:
   "errors": [],
   "meta": {
     "format": "json",
-    "flags": ["--status"],
     "runtime": "cli"
   }
 }
@@ -396,7 +458,7 @@ Multi-account support uses `token-accounts.json`:
   "schemaVersion": "caut.v1",
   "generatedAt": "2026-01-18T12:00:00Z",
   "command": "cost",
-  "providers": [
+  "data": [
     {
       "provider": "claude",
       "source": "local",
@@ -424,7 +486,6 @@ Multi-account support uses `token-accounts.json`:
   "errors": [],
   "meta": {
     "format": "json",
-    "flags": [],
     "runtime": "cli"
   }
 }
@@ -490,11 +551,35 @@ Multi-account support uses `token-accounts.json`:
 
 | Code | Meaning | Example |
 |------|---------|---------|
-| 0 | Success | Normal operation |
-| 1 | General error | Network failure, I/O error |
-| 2 | Binary not found | Provider CLI not installed |
-| 3 | Parse/config error | Invalid arguments, bad JSON |
-| 4 | Timeout | Web fetch exceeded limit |
+| `0` | Success | Normal operation |
+| `1` | General error | Network failure, I/O error |
+| `2` | Binary not found | Provider CLI not installed |
+| `3` | Parse/config error | Invalid arguments, bad JSON |
+| `4` | Timeout | Web fetch exceeded limit |
+
+---
+
+## Performance
+
+caut is designed for **fast startup** and **minimal resource usage**:
+
+| Metric | Value |
+|--------|-------|
+| Binary size | ~3MB (release, stripped) |
+| Startup time | ~10ms |
+| Memory usage | ~10MB peak |
+| First response | <500ms (cached) |
+
+Release builds use aggressive optimization:
+
+```toml
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Better optimization
+panic = "abort"     # Smaller binary
+strip = true        # Remove symbols
+```
 
 ---
 
@@ -515,6 +600,7 @@ which claude
 ### "No available fetch strategy" (Exit 3)
 
 No data source is available for the provider:
+
 - **Web source**: Requires browser cookies (macOS only)
 - **CLI source**: Requires provider CLI installed
 - **OAuth source**: Requires token configuration
@@ -553,10 +639,12 @@ caut cost --refresh
 
 ## Limitations
 
-- **No GUI**: caut is CLI-only. For a menu bar app, use [CodexBar](https://github.com/steipete/codexbar).
-- **Web sources (macOS only)**: Browser cookie extraction requires macOS. Linux/Windows users should use CLI or OAuth sources.
-- **Local cost scanning**: Only Codex and Claude support local JSONL log scanning.
-- **Token account sync**: No automatic sync with provider dashboards—manual token management required.
+| Limitation | Workaround |
+|------------|------------|
+| **No GUI** | Use [CodexBar](https://github.com/steipete/codexbar) for menu bar app |
+| **Web sources (macOS only)** | Use CLI or OAuth sources on Linux/Windows |
+| **Local cost scanning** | Only Codex and Claude support JSONL log scanning |
+| **Token account sync** | Manual token management required |
 
 ---
 
@@ -606,6 +694,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 ## Acknowledgments
 
 - [CodexBar](https://github.com/steipete/codexbar) by Peter Steinberger — the original macOS app this project ports
+- [rich_rust](https://crates.io/crates/rich_rust) — Rust port of Python Rich for terminal output
 - [clap](https://crates.io/crates/clap) — CLI argument parsing
 - [tokio](https://tokio.rs) — async runtime
 - [serde](https://serde.rs) — serialization framework
