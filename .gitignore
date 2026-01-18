@@ -1,0 +1,36 @@
+# Rust build artifacts
+/target/
+
+# Legacy code (spec extraction only)
+/legacy_codexbar/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Coverage
+*.profraw
+*.profdata
+/coverage/
+tarpaulin-report.html
+
+# Benchmarks output
+/criterion/
+
+
+# Added by cargo
+
+/target
+
+# bv (beads viewer) local config and caches
+.bv/
