@@ -1,0 +1,390 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dicklesworthstone/coding_agent_usage_tracker/schemas/caut-v1.schema.json",
+  "title": "CAUT Robot Output",
+  "description": "JSON schema for CAUT (Coding Agent Usage Tracker) robot mode output",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "command", "data", "errors", "meta"],
+  "properties": {
+    "schemaVersion": {
+      "const": "caut.v1",
+      "description": "Schema version identifier"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 timestamp when the output was generated"
+    },
+    "command": {
+      "type": "string",
+      "enum": ["usage", "cost", "status", "config", "doctor"],
+      "description": "The command that generated this output"
+    },
+    "data": {
+      "type": "array",
+      "description": "Array of provider payloads (type depends on command)",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/ProviderPayload" },
+          { "$ref": "#/$defs/CostPayload" }
+        ]
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Array of error messages (may be empty)"
+    },
+    "meta": {
+      "$ref": "#/$defs/RobotMeta"
+    }
+  },
+  "$defs": {
+    "RobotMeta": {
+      "type": "object",
+      "required": ["format", "flags", "runtime"],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["json", "markdown"],
+          "description": "Output format"
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CLI flags used"
+        },
+        "runtime": {
+          "type": "string",
+          "enum": ["cli", "daemon", "watch"],
+          "description": "Runtime context"
+        }
+      }
+    },
+    "RateWindow": {
+      "type": "object",
+      "required": ["usedPercent"],
+      "properties": {
+        "usedPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Percentage of the rate window consumed"
+        },
+        "windowMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Duration of the rate window in minutes"
+        },
+        "resetsAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the rate window resets"
+        },
+        "resetDescription": {
+          "type": "string",
+          "description": "Human-readable reset description"
+        }
+      }
+    },
+    "ProviderIdentity": {
+      "type": "object",
+      "properties": {
+        "accountEmail": {
+          "type": "string",
+          "format": "email"
+        },
+        "accountOrganization": {
+          "type": "string"
+        },
+        "loginMethod": {
+          "type": "string"
+        }
+      }
+    },
+    "UsageSnapshot": {
+      "type": "object",
+      "required": ["updatedAt"],
+      "properties": {
+        "primary": {
+          "$ref": "#/$defs/RateWindow"
+        },
+        "secondary": {
+          "$ref": "#/$defs/RateWindow"
+        },
+        "tertiary": {
+          "$ref": "#/$defs/RateWindow"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "identity": {
+          "$ref": "#/$defs/ProviderIdentity"
+        }
+      }
+    },
+    "CreditEvent": {
+      "type": "object",
+      "required": ["amount", "eventType", "timestamp"],
+      "properties": {
+        "amount": {
+          "type": "number"
+        },
+        "eventType": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "CreditsSnapshot": {
+      "type": "object",
+      "required": ["remaining", "events", "updatedAt"],
+      "properties": {
+        "remaining": {
+          "type": "number",
+          "minimum": 0
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CreditEvent"
+          }
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "StatusIndicator": {
+      "type": "string",
+      "enum": ["none", "minor", "major", "critical", "maintenance", "unknown"]
+    },
+    "StatusPayload": {
+      "type": "object",
+      "required": ["indicator", "url"],
+      "properties": {
+        "indicator": {
+          "$ref": "#/$defs/StatusIndicator"
+        },
+        "description": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    },
+    "ProviderPayload": {
+      "type": "object",
+      "required": ["provider", "source", "usage"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Provider name (e.g., 'claude', 'codex')"
+        },
+        "account": {
+          "type": "string",
+          "description": "Account identifier"
+        },
+        "version": {
+          "type": "string",
+          "description": "Provider/CLI version"
+        },
+        "source": {
+          "type": "string",
+          "description": "Data source (e.g., 'cli', 'oauth', 'config')"
+        },
+        "status": {
+          "$ref": "#/$defs/StatusPayload"
+        },
+        "usage": {
+          "$ref": "#/$defs/UsageSnapshot"
+        },
+        "credits": {
+          "$ref": "#/$defs/CreditsSnapshot"
+        },
+        "antigravityPlanInfo": {
+          "type": "object",
+          "description": "Antigravity plan information (if applicable)"
+        },
+        "openaiDashboard": {
+          "$ref": "#/$defs/OpenAIDashboardSnapshot"
+        }
+      }
+    },
+    "OpenAIDashboardDailyBreakdown": {
+      "type": "object",
+      "required": ["date"],
+      "properties": {
+        "date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "cost": {
+          "type": "number"
+        },
+        "tokens": {
+          "type": "integer"
+        }
+      }
+    },
+    "OpenAIDashboardSnapshot": {
+      "type": "object",
+      "required": ["updatedAt"],
+      "properties": {
+        "signedInEmail": {
+          "type": "string",
+          "format": "email"
+        },
+        "codeReviewRemainingPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "creditEvents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CreditEvent"
+          }
+        },
+        "dailyBreakdown": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OpenAIDashboardDailyBreakdown"
+          }
+        },
+        "creditsPurchaseUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "primaryLimit": {
+          "$ref": "#/$defs/RateWindow"
+        },
+        "secondaryLimit": {
+          "$ref": "#/$defs/RateWindow"
+        },
+        "creditsRemaining": {
+          "type": "number"
+        },
+        "accountPlan": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "CostDailyEntry": {
+      "type": "object",
+      "required": ["date"],
+      "properties": {
+        "date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "inputTokens": {
+          "type": "integer"
+        },
+        "outputTokens": {
+          "type": "integer"
+        },
+        "cacheReadTokens": {
+          "type": "integer"
+        },
+        "cacheCreationTokens": {
+          "type": "integer"
+        },
+        "totalTokens": {
+          "type": "integer"
+        },
+        "totalCost": {
+          "type": "number"
+        },
+        "modelsUsed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "CostTotals": {
+      "type": "object",
+      "properties": {
+        "inputTokens": {
+          "type": "integer"
+        },
+        "outputTokens": {
+          "type": "integer"
+        },
+        "cacheReadTokens": {
+          "type": "integer"
+        },
+        "cacheCreationTokens": {
+          "type": "integer"
+        },
+        "totalTokens": {
+          "type": "integer"
+        },
+        "totalCost": {
+          "type": "number"
+        }
+      }
+    },
+    "CostPayload": {
+      "type": "object",
+      "required": ["provider", "source", "updatedAt", "daily"],
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sessionTokens": {
+          "type": "integer"
+        },
+        "sessionCostUsd": {
+          "type": "number"
+        },
+        "last30DaysTokens": {
+          "type": "integer"
+        },
+        "last30DaysCostUsd": {
+          "type": "number"
+        },
+        "daily": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CostDailyEntry"
+          }
+        },
+        "totals": {
+          "$ref": "#/$defs/CostTotals"
+        }
+      }
+    }
+  }
+}
