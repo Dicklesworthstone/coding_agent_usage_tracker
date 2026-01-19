@@ -675,7 +675,7 @@ Beads provides a lightweight, dependency-aware issue database and CLI (`br`) for
 ### Conventions
 
 - **Single source of truth:** Beads for task status/priority/dependencies; Agent Mail for conversation and audit
-- **Shared identifiers:** Use Beads issue ID (e.g., `bd-123`) as Mail `thread_id` and prefix subjects with `[bd-123]`
+- **Shared identifiers:** Use Beads issue ID (e.g., `br-123`) as Mail `thread_id` and prefix subjects with `[br-123]`
 - **Reservations:** When starting a task, call `file_reservation_paths()` with the issue ID in `reason`
 
 ### Typical Agent Flow
@@ -687,33 +687,33 @@ Beads provides a lightweight, dependency-aware issue database and CLI (`br`) for
 
 2. **Reserve edit surface (Mail):**
    ```
-   file_reservation_paths(project_key, agent_name, ["src/**"], ttl_seconds=3600, exclusive=true, reason="bd-123")
+   file_reservation_paths(project_key, agent_name, ["src/**"], ttl_seconds=3600, exclusive=true, reason="br-123")
    ```
 
 3. **Announce start (Mail):**
    ```
-   send_message(..., thread_id="bd-123", subject="[bd-123] Start: <title>", ack_required=true)
+   send_message(..., thread_id="br-123", subject="[br-123] Start: <title>", ack_required=true)
    ```
 
 4. **Work and update:** Reply in-thread with progress
 
 5. **Complete and release:**
    ```bash
-   br close bd-123 --reason "Completed"
+   br close br-123 --reason "Completed"
    ```
    ```
    release_file_reservations(project_key, agent_name, paths=["src/**"])
    ```
-   Final Mail reply: `[bd-123] Completed` with summary
+   Final Mail reply: `[br-123] Completed` with summary
 
 ### Mapping Cheat Sheet
 
 | Concept | Value |
 |---------|-------|
-| Mail `thread_id` | `bd-###` |
-| Mail subject | `[bd-###] ...` |
-| File reservation `reason` | `bd-###` |
-| Commit messages | Include `bd-###` for traceability |
+| Mail `thread_id` | `br-###` |
+| Mail subject | `[br-###] ...` |
+| File reservation `reason` | `br-###` |
+| Commit messages | Include `br-###` for traceability |
 
 ---
 

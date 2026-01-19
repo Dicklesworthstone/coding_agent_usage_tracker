@@ -3,6 +3,7 @@
 pub mod args;
 pub mod cost;
 pub mod doctor;
+pub mod history;
 pub mod usage;
 pub mod watch;
 

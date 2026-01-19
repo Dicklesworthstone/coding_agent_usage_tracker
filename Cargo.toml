@@ -48,6 +48,7 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 which = "8.0.0"
 futures = "0.3.31"
+rusqlite = "0.38.0"
 
 # Test utilities (optional)
 tempfile = { version = "3.15", optional = true }

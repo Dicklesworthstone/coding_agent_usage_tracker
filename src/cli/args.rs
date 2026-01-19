@@ -65,12 +65,45 @@ pub enum Commands {
     /// Show local cost usage
     Cost(CostArgs),
 
+    /// Manage usage history and retention
+    #[command(subcommand)]
+    History(HistoryCommand),
+
     /// Manage token accounts
     #[command(subcommand)]
     TokenAccounts(TokenAccountsCommand),
 
     /// Diagnose caut setup and provider health
     Doctor(DoctorArgs),
+}
+
+/// History subcommands.
+#[derive(Subcommand, Debug)]
+pub enum HistoryCommand {
+    /// Prune old history data according to retention policy
+    Prune(HistoryPruneArgs),
+    /// Show history database statistics
+    Stats,
+}
+
+/// Arguments for `history prune`.
+#[derive(Parser, Debug)]
+pub struct HistoryPruneArgs {
+    /// Preview what would be deleted without making changes
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Days to keep detailed snapshots (default: 30)
+    #[arg(long, value_name = "DAYS")]
+    pub keep_days: Option<i64>,
+
+    /// Days to keep daily aggregates (default: 365)
+    #[arg(long, value_name = "DAYS")]
+    pub keep_aggregates: Option<i64>,
+
+    /// Maximum database size in MB (default: 100)
+    #[arg(long, value_name = "MB")]
+    pub max_size_mb: Option<u64>,
 }
 
 /// Arguments for the `usage` command.

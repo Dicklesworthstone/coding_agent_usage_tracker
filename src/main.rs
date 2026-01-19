@@ -77,6 +77,8 @@ async fn run(cli: Cli) -> caut::Result<()> {
         Some(Commands::Doctor(args)) => {
             caut::cli::doctor::execute(&args, format, pretty, no_color).await
         }
+
+        Some(Commands::History(cmd)) => caut::cli::history::execute(&cmd, format, pretty),
     }
 }
 
