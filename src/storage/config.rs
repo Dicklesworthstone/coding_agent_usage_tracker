@@ -769,6 +769,7 @@ pretty = true
             log_level: None,
             json_output: false,
             verbose: false,
+            debug_rich: false,
         }
     }
 

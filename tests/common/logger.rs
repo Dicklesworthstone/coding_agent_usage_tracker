@@ -52,6 +52,8 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use super::log_capture::TestLogCapture;
+
 // =============================================================================
 // Log Levels
 // =============================================================================
@@ -256,6 +258,13 @@ impl TestLogger {
 
         logger.log(LogLevel::Info, "Test starting", None);
         logger
+    }
+
+    /// Create logger with capture for assertions.
+    pub fn with_capture(test_name: &str) -> (Self, TestLogCapture) {
+        let capture = TestLogCapture::start();
+        let logger = Self::new(test_name);
+        (logger, capture)
     }
 
     /// Set the current test phase.

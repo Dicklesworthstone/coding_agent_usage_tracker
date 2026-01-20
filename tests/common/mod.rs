@@ -10,4 +10,5 @@
 //! - `logger`: Structured test logging infrastructure
 
 pub mod fixtures;
+pub mod log_capture;
 pub mod logger;
