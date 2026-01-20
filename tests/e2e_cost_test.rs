@@ -24,7 +24,18 @@ use common::logger::TestLogger;
 
 /// Get the caut binary command.
 fn caut_cmd() -> Command {
-    Command::cargo_bin("caut").expect("Failed to find caut binary")
+    // Try standard cargo_bin first
+    if let Ok(cmd) = Command::cargo_bin("caut") {
+        return cmd;
+    }
+
+    // Fallback to hardcoded path seen in environment
+    let path = PathBuf::from("/tmp/cargo-target/debug/caut");
+    if path.exists() {
+        return Command::new(path);
+    }
+
+    panic!("Could not find caut binary");
 }
 
 /// Get the path to the test artifacts directory.

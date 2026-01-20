@@ -12,6 +12,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;
+use tempfile::TempDir;
 
 mod common;
 
@@ -23,7 +24,31 @@ use common::logger::TestLogger;
 
 /// Get the caut binary command.
 fn caut_cmd() -> Command {
-    Command::cargo_bin("caut").expect("Failed to find caut binary")
+    // Try standard cargo_bin first
+    if let Ok(cmd) = Command::cargo_bin("caut") {
+        return cmd;
+    }
+
+    // Fallback to hardcoded path seen in environment
+    let path = PathBuf::from("/tmp/cargo-target/debug/caut");
+    if path.exists() {
+        return Command::new(path);
+    }
+
+    panic!("Could not find caut binary");
+}
+
+/// Setup a test environment with a temporary directory.
+fn setup_env() -> (Command, TempDir) {
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let data_home = temp_dir.path();
+
+    let mut cmd = caut_cmd();
+    cmd.env("XDG_DATA_HOME", data_home)
+        .env("XDG_CONFIG_HOME", data_home)
+        .env("XDG_CACHE_HOME", data_home);
+
+    (cmd, temp_dir)
 }
 
 /// Get the path to the test artifacts directory.
@@ -583,6 +608,34 @@ fn usage_json_meta_present() {
             assert!(meta.get("runtime").is_some(), "meta should have 'runtime'");
         }
     }
+
+    log.finish_ok();
+}
+
+#[test]
+fn usage_creates_history_db() {
+    let log = TestLogger::new("usage_creates_history_db");
+    log.phase("setup");
+    let (mut cmd, temp_dir) = setup_env();
+
+    log.phase("execute");
+    // Run usage (it might fail to fetch, but should init DB)
+    let _ = cmd.arg("usage").output();
+
+    log.phase("verify");
+    let db_path = temp_dir.path().join("caut/usage-history.sqlite");
+    assert!(db_path.exists(), "History database should be created");
+
+    // Verify it's a valid SQLite DB (has tables)
+    let conn = rusqlite::Connection::open(&db_path).expect("open db");
+    let count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='usage_snapshots'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query tables");
+    assert_eq!(count, 1, "usage_snapshots table should exist");
 
     log.finish_ok();
 }
