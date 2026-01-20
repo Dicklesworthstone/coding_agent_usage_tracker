@@ -66,6 +66,12 @@ impl AppPaths {
         self.cache.join(format!("cost-usage/{}-v1.json", provider))
     }
 
+    /// Path to history database file.
+    #[must_use]
+    pub fn history_db_file(&self) -> PathBuf {
+        self.data.join("usage-history.sqlite")
+    }
+
     /// Ensure all directories exist.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.config)?;

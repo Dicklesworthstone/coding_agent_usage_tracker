@@ -22,7 +22,9 @@ use rusqlite::{Connection, Row, params};
 use crate::core::models::UsageSnapshot;
 use crate::core::provider::Provider;
 use crate::error::{CautError, Result};
-use crate::storage::history_schema::{DEFAULT_RETENTION_DAYS, cleanup_old_snapshots, run_migrations};
+use crate::storage::history_schema::{
+    DEFAULT_RETENTION_DAYS, cleanup_old_snapshots, run_migrations,
+};
 
 /// Default retention for detailed snapshots (days).
 pub const DEFAULT_DETAILED_RETENTION_DAYS: i64 = 30;
@@ -147,6 +149,16 @@ impl HistoryStore {
         Ok(Self { conn })
     }
 
+    /// Open an in-memory history database (for testing).
+    pub fn open_in_memory() -> Result<Self> {
+        let mut conn = Connection::open_in_memory()
+            .map_err(|e| CautError::Other(anyhow::anyhow!("open in-memory db: {e}")))?;
+
+        run_migrations(&mut conn)?;
+
+        Ok(Self { conn })
+    }
+
     /// Record a usage snapshot for a provider.
     pub fn record_snapshot(&self, snapshot: &UsageSnapshot, provider: &Provider) -> Result<i64> {
         let primary = snapshot.primary.as_ref();
@@ -156,13 +168,13 @@ impl HistoryStore {
         let identity = snapshot.identity.as_ref();
 
         let mut stmt = self.conn.prepare_cached(
-            "INSERT INTO usage_snapshots (\
-                provider, fetched_at, source,\
-                primary_used_pct, primary_window_minutes, primary_resets_at,\
-                secondary_used_pct, secondary_window_minutes, secondary_resets_at,\
-                tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at,\
-                cost_today_usd, cost_mtd_usd, credits_remaining,\
-                account_email, account_org, fetch_duration_ms\
+            "INSERT INTO usage_snapshots ( \
+                provider, fetched_at, source, \
+                primary_used_pct, primary_window_minutes, primary_resets_at, \
+                secondary_used_pct, secondary_window_minutes, secondary_resets_at, \
+                tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at, \
+                cost_today_usd, cost_mtd_usd, credits_remaining, \
+                account_email, account_org, fetch_duration_ms \
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"
         )
         .map_err(|e| CautError::Other(anyhow::anyhow!("prepare insert: {e}")))?;
@@ -173,13 +185,19 @@ impl HistoryStore {
             "unknown",
             primary.map(|p| p.used_percent),
             primary.and_then(|p| p.window_minutes),
-            primary.and_then(|p| p.resets_at.as_ref()).map(|dt| dt.to_rfc3339()),
+            primary
+                .and_then(|p| p.resets_at.as_ref())
+                .map(|dt| dt.to_rfc3339()),
             secondary.map(|p| p.used_percent),
             secondary.and_then(|p| p.window_minutes),
-            secondary.and_then(|p| p.resets_at.as_ref()).map(|dt| dt.to_rfc3339()),
+            secondary
+                .and_then(|p| p.resets_at.as_ref())
+                .map(|dt| dt.to_rfc3339()),
             tertiary.map(|p| p.used_percent),
             tertiary.and_then(|p| p.window_minutes),
-            tertiary.and_then(|p| p.resets_at.as_ref()).map(|dt| dt.to_rfc3339()),
+            tertiary
+                .and_then(|p| p.resets_at.as_ref())
+                .map(|dt| dt.to_rfc3339()),
             Option::<f64>::None,
             Option::<f64>::None,
             Option::<f64>::None,
@@ -205,19 +223,21 @@ impl HistoryStore {
             ));
         }
 
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT\
-                id, provider, fetched_at, source,\
-                primary_used_pct, primary_window_minutes, primary_resets_at,\
-                secondary_used_pct, secondary_window_minutes, secondary_resets_at,\
-                tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at,\
-                cost_today_usd, cost_mtd_usd, credits_remaining,\
-                account_email, account_org, fetch_duration_ms, created_at\
-            FROM usage_snapshots\
-            WHERE provider = ?1 AND fetched_at BETWEEN ?2 AND ?3\
-            ORDER BY fetched_at DESC"
-        )
-        .map_err(|e| CautError::Other(anyhow::anyhow!("prepare select: {e}")))?;
+        let mut stmt = self
+            .conn
+            .prepare_cached(
+                "SELECT \
+                id, provider, fetched_at, source, \
+                primary_used_pct, primary_window_minutes, primary_resets_at, \
+                secondary_used_pct, secondary_window_minutes, secondary_resets_at, \
+                tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at, \
+                cost_today_usd, cost_mtd_usd, credits_remaining, \
+                account_email, account_org, fetch_duration_ms, created_at \
+            FROM usage_snapshots \
+            WHERE provider = ?1 AND fetched_at BETWEEN ?2 AND ?3 \
+            ORDER BY fetched_at DESC",
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("prepare select: {e}")))?;
 
         let rows = stmt
             .query_map(
@@ -236,18 +256,20 @@ impl HistoryStore {
 
     /// Get the latest snapshot for each provider.
     pub fn get_latest_all(&self) -> Result<HashMap<Provider, StoredSnapshot>> {
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT\
-                id, provider, fetched_at, source,\
-                primary_used_pct, primary_window_minutes, primary_resets_at,\
-                secondary_used_pct, secondary_window_minutes, secondary_resets_at,\
-                tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at,\
-                cost_today_usd, cost_mtd_usd, credits_remaining,\
-                account_email, account_org, fetch_duration_ms, created_at\
-            FROM usage_snapshots\
-            ORDER BY fetched_at DESC"
-        )
-        .map_err(|e| CautError::Other(anyhow::anyhow!("prepare latest query: {e}")))?;
+        let mut stmt = self
+            .conn
+            .prepare_cached(
+                "SELECT \
+                id, provider, fetched_at, source, \
+                primary_used_pct, primary_window_minutes, primary_resets_at, \
+                secondary_used_pct, secondary_window_minutes, secondary_resets_at, \
+                tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at, \
+                cost_today_usd, cost_mtd_usd, credits_remaining, \
+                account_email, account_org, fetch_duration_ms, created_at \
+            FROM usage_snapshots \
+            ORDER BY fetched_at DESC",
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("prepare select: {e}")))?;
 
         let rows = stmt
             .query_map([], map_row)
@@ -326,14 +348,8 @@ impl HistoryStore {
 
         let sum: f64 = values.iter().sum();
         let average_primary_pct = sum / sample_count as f64;
-        let max_primary_pct = values
-            .iter()
-            .copied()
-            .fold(f64::NEG_INFINITY, f64::max);
-        let min_primary_pct = values
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, f64::min);
+        let max_primary_pct = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let min_primary_pct = values.iter().copied().fold(f64::INFINITY, f64::min);
 
         Ok(UsageStats {
             average_primary_pct,
@@ -392,7 +408,11 @@ impl HistoryStore {
         }
 
         // Phase 3: Check size limit
-        let current_size = if dry_run { initial_size } else { self.get_db_size()? };
+        let current_size = if dry_run {
+            initial_size
+        } else {
+            self.get_db_size()?
+        };
         if current_size > policy.max_size_bytes {
             result.size_limit_triggered = true;
             if !dry_run {
@@ -409,7 +429,11 @@ impl HistoryStore {
         }
 
         // Calculate bytes freed
-        let final_size = if dry_run { initial_size } else { self.get_db_size()? };
+        let final_size = if dry_run {
+            initial_size
+        } else {
+            self.get_db_size()?
+        };
         result.bytes_freed = initial_size.saturating_sub(final_size);
         result.duration_ms = start.elapsed().as_millis() as u64;
 
@@ -453,7 +477,12 @@ impl HistoryStore {
     /// Count rows in a specified table.
     pub fn count_rows(&self, table: &str) -> Result<i64> {
         // Validate table name to prevent SQL injection
-        let valid_tables = ["usage_snapshots", "daily_aggregates", "prune_history", "schema_migrations"];
+        let valid_tables = [
+            "usage_snapshots",
+            "daily_aggregates",
+            "prune_history",
+            "schema_migrations",
+        ];
         if !valid_tables.contains(&table) {
             return Err(CautError::Config(format!("Invalid table name: {table}")));
         }
@@ -525,16 +554,19 @@ impl HistoryStore {
     fn aggregate_old_snapshots(&self, cutoff: &DateTime<Utc>, dry_run: bool) -> Result<usize> {
         // Find all days with snapshots older than cutoff that don't have aggregates yet
         let days_to_aggregate: Vec<(String, String)> = {
-            let mut stmt = self.conn.prepare_cached(
-                "SELECT DISTINCT provider, date(fetched_at) as day \
+            let mut stmt = self
+                .conn
+                .prepare_cached(
+                    "SELECT DISTINCT provider, date(fetched_at) as day \
                  FROM usage_snapshots \
                  WHERE fetched_at < ?1 \
                  AND NOT EXISTS (\
                      SELECT 1 FROM daily_aggregates \
                      WHERE daily_aggregates.provider = usage_snapshots.provider \
                      AND daily_aggregates.date = date(fetched_at)\
-                 )"
-            ).map_err(|e| CautError::Other(anyhow::anyhow!("prepare aggregate query: {e}")))?;
+                 )",
+                )
+                .map_err(|e| CautError::Other(anyhow::anyhow!("prepare aggregate query: {e}")))?;
 
             let rows = stmt
                 .query_map([cutoff.to_rfc3339()], |row| {
@@ -567,8 +599,10 @@ impl HistoryStore {
     /// Create a daily aggregate from snapshots for a specific provider/day.
     fn create_daily_aggregate(&self, provider: &str, day: &str) -> Result<bool> {
         // Calculate aggregate stats
-        let stats: Option<AggregateStats> = self.conn.query_row(
-            "SELECT \
+        let stats: Option<AggregateStats> = self
+            .conn
+            .query_row(
+                "SELECT \
                 AVG(primary_used_pct), MAX(primary_used_pct), MIN(primary_used_pct), \
                 AVG(secondary_used_pct), MAX(secondary_used_pct), MIN(secondary_used_pct), \
                 AVG(tertiary_used_pct), MAX(tertiary_used_pct), MIN(tertiary_used_pct), \
@@ -577,33 +611,37 @@ impl HistoryStore {
              FROM usage_snapshots \
              WHERE provider = ?1 AND date(fetched_at) = ?2 \
              GROUP BY provider, date(fetched_at)",
-            params![provider, day],
-            |row| Ok(AggregateStats {
-                primary_avg: row.get(0)?,
-                primary_max: row.get(1)?,
-                primary_min: row.get(2)?,
-                secondary_avg: row.get(3)?,
-                secondary_max: row.get(4)?,
-                secondary_min: row.get(5)?,
-                tertiary_avg: row.get(6)?,
-                tertiary_max: row.get(7)?,
-                tertiary_min: row.get(8)?,
-                total_cost: row.get(9)?,
-                sample_count: row.get(10)?,
-                first_fetch: row.get(11)?,
-                last_fetch: row.get(12)?,
-                account_email: row.get(13)?,
-                account_org: row.get(14)?,
-            }),
-        ).ok();
+                params![provider, day],
+                |row| {
+                    Ok(AggregateStats {
+                        primary_avg: row.get(0)?,
+                        primary_max: row.get(1)?,
+                        primary_min: row.get(2)?,
+                        secondary_avg: row.get(3)?,
+                        secondary_max: row.get(4)?,
+                        secondary_min: row.get(5)?,
+                        tertiary_avg: row.get(6)?,
+                        tertiary_max: row.get(7)?,
+                        tertiary_min: row.get(8)?,
+                        total_cost: row.get(9)?,
+                        sample_count: row.get(10)?,
+                        first_fetch: row.get(11)?,
+                        last_fetch: row.get(12)?,
+                        account_email: row.get(13)?,
+                        account_org: row.get(14)?,
+                    })
+                },
+            )
+            .ok();
 
         let Some(stats) = stats else {
             return Ok(false);
         };
 
         // Insert the aggregate
-        self.conn.execute(
-            "INSERT OR REPLACE INTO daily_aggregates (\
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO daily_aggregates (\
                 provider, date, \
                 primary_avg_used_pct, primary_max_used_pct, primary_min_used_pct, \
                 secondary_avg_used_pct, secondary_max_used_pct, secondary_min_used_pct, \
@@ -611,56 +649,80 @@ impl HistoryStore {
                 total_cost_usd, sample_count, first_fetch, last_fetch, \
                 account_email, account_org\
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
-            params![
-                provider, day,
-                stats.primary_avg, stats.primary_max, stats.primary_min,
-                stats.secondary_avg, stats.secondary_max, stats.secondary_min,
-                stats.tertiary_avg, stats.tertiary_max, stats.tertiary_min,
-                stats.total_cost, stats.sample_count, stats.first_fetch, stats.last_fetch,
-                stats.account_email, stats.account_org,
-            ],
-        ).map_err(|e| CautError::Other(anyhow::anyhow!("insert aggregate: {e}")))?;
+                params![
+                    provider,
+                    day,
+                    stats.primary_avg,
+                    stats.primary_max,
+                    stats.primary_min,
+                    stats.secondary_avg,
+                    stats.secondary_max,
+                    stats.secondary_min,
+                    stats.tertiary_avg,
+                    stats.tertiary_max,
+                    stats.tertiary_min,
+                    stats.total_cost,
+                    stats.sample_count,
+                    stats.first_fetch,
+                    stats.last_fetch,
+                    stats.account_email,
+                    stats.account_org,
+                ],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("insert aggregate: {e}")))?;
 
         Ok(true)
     }
 
     /// Delete old snapshots (after aggregation).
     fn delete_old_snapshots(&self, cutoff: &DateTime<Utc>) -> Result<usize> {
-        let deleted = self.conn.execute(
-            "DELETE FROM usage_snapshots WHERE fetched_at < ?1",
-            [cutoff.to_rfc3339()],
-        ).map_err(|e| CautError::Other(anyhow::anyhow!("delete snapshots: {e}")))?;
+        let deleted = self
+            .conn
+            .execute(
+                "DELETE FROM usage_snapshots WHERE fetched_at < ?1",
+                [cutoff.to_rfc3339()],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("delete snapshots: {e}")))?;
         Ok(deleted)
     }
 
     /// Count old snapshots that would be deleted.
     fn count_old_snapshots(&self, cutoff: &DateTime<Utc>) -> Result<usize> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM usage_snapshots WHERE fetched_at < ?1",
-            [cutoff.to_rfc3339()],
-            |row| row.get(0),
-        ).map_err(|e| CautError::Other(anyhow::anyhow!("count snapshots: {e}")))?;
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM usage_snapshots WHERE fetched_at < ?1",
+                [cutoff.to_rfc3339()],
+                |row| row.get(0),
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("count snapshots: {e}")))?;
         Ok(count as usize)
     }
 
     /// Delete old aggregates.
     fn delete_old_aggregates(&self, cutoff: &DateTime<Utc>) -> Result<usize> {
         let cutoff_date = cutoff.format("%Y-%m-%d").to_string();
-        let deleted = self.conn.execute(
-            "DELETE FROM daily_aggregates WHERE date < ?1",
-            [cutoff_date],
-        ).map_err(|e| CautError::Other(anyhow::anyhow!("delete aggregates: {e}")))?;
+        let deleted = self
+            .conn
+            .execute(
+                "DELETE FROM daily_aggregates WHERE date < ?1",
+                [cutoff_date],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("delete aggregates: {e}")))?;
         Ok(deleted)
     }
 
     /// Count old aggregates that would be deleted.
     fn count_old_aggregates(&self, cutoff: &DateTime<Utc>) -> Result<usize> {
         let cutoff_date = cutoff.format("%Y-%m-%d").to_string();
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM daily_aggregates WHERE date < ?1",
-            [cutoff_date],
-            |row| row.get(0),
-        ).map_err(|e| CautError::Other(anyhow::anyhow!("count aggregates: {e}")))?;
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM daily_aggregates WHERE date < ?1",
+                [cutoff_date],
+                |row| row.get(0),
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("count aggregates: {e}")))?;
         Ok(count as usize)
     }
 
@@ -674,21 +736,27 @@ impl HistoryStore {
             }
 
             // Delete oldest 100 snapshots
-            let deleted = self.conn.execute(
-                "DELETE FROM usage_snapshots WHERE id IN (\
+            let deleted = self
+                .conn
+                .execute(
+                    "DELETE FROM usage_snapshots WHERE id IN (\
                     SELECT id FROM usage_snapshots ORDER BY fetched_at ASC LIMIT 100\
                 )",
-                [],
-            ).map_err(|e| CautError::Other(anyhow::anyhow!("delete batch: {e}")))?;
+                    [],
+                )
+                .map_err(|e| CautError::Other(anyhow::anyhow!("delete batch: {e}")))?;
 
             if deleted == 0 {
                 // No more snapshots, try aggregates
-                let agg_deleted = self.conn.execute(
-                    "DELETE FROM daily_aggregates WHERE id IN (\
+                let agg_deleted = self
+                    .conn
+                    .execute(
+                        "DELETE FROM daily_aggregates WHERE id IN (\
                         SELECT id FROM daily_aggregates ORDER BY date ASC LIMIT 100\
                     )",
-                    [],
-                ).map_err(|e| CautError::Other(anyhow::anyhow!("delete agg batch: {e}")))?;
+                        [],
+                    )
+                    .map_err(|e| CautError::Other(anyhow::anyhow!("delete agg batch: {e}")))?;
 
                 if agg_deleted == 0 {
                     break; // Nothing left to delete
@@ -773,7 +841,10 @@ pub enum StatsPeriod {
     Last30Days,
     ThisMonth,
     LastMonth,
-    Custom { from: DateTime<Utc>, to: DateTime<Utc> },
+    Custom {
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    },
 }
 
 impl StatsPeriod {
@@ -819,14 +890,16 @@ impl StatsPeriod {
 
 fn map_row(row: &Row<'_>) -> rusqlite::Result<StoredSnapshot> {
     let provider_name: String = row.get(1)?;
-    let provider = Provider::from_cli_name(&provider_name)
-        .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
+    let provider = Provider::from_cli_name(&provider_name).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    })?;
 
     Ok(StoredSnapshot {
         id: row.get(0)?,
         provider,
-        fetched_at: parse_timestamp(row.get::<_, String>(2)?)
-            .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?,
+        fetched_at: parse_timestamp(row.get::<_, String>(2)?).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+        })?,
         source: row.get(3)?,
 
         primary_used_pct: row.get(4)?,
@@ -860,7 +933,11 @@ fn parse_timestamp(value: String) -> Result<DateTime<Utc>> {
 }
 
 fn parse_optional_timestamp(value: Option<String>) -> Option<DateTime<Utc>> {
-    value.and_then(|v| DateTime::parse_from_rfc3339(&v).ok().map(|dt| dt.with_timezone(&Utc)))
+    value.and_then(|v| {
+        DateTime::parse_from_rfc3339(&v)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc))
+    })
 }
 
 fn start_of_day(date: NaiveDate) -> DateTime<Utc> {
@@ -868,8 +945,7 @@ fn start_of_day(date: NaiveDate) -> DateTime<Utc> {
 }
 
 fn start_of_month(date: NaiveDate) -> DateTime<Utc> {
-    let start = NaiveDate::from_ymd_opt(date.year(), date.month(), 1)
-        .expect("start of month");
+    let start = NaiveDate::from_ymd_opt(date.year(), date.month(), 1).expect("start of month");
     start_of_day(start)
 }
 
@@ -890,8 +966,7 @@ mod tests {
     use crate::core::models::{ProviderIdentity, RateWindow, UsageSnapshot};
 
     fn open_temp_store() -> HistoryStore {
-        let file = tempfile::NamedTempFile::new().expect("tempfile");
-        HistoryStore::open(file.path()).expect("open store")
+        HistoryStore::open_in_memory().expect("open store")
     }
 
     fn make_snapshot(at: DateTime<Utc>, used: f64) -> UsageSnapshot {
@@ -925,7 +1000,11 @@ mod tests {
         assert!(id > 0);
 
         let results = store
-            .get_snapshots(&Provider::Codex, now - Duration::hours(1), now + Duration::hours(1))
+            .get_snapshots(
+                &Provider::Codex,
+                now - Duration::hours(1),
+                now + Duration::hours(1),
+            )
             .expect("query snapshots");
 
         assert_eq!(results.len(), 1);
@@ -941,7 +1020,10 @@ mod tests {
         let now = Utc::now();
 
         store
-            .record_snapshot(&make_snapshot(now - Duration::minutes(10), 10.0), &Provider::Codex)
+            .record_snapshot(
+                &make_snapshot(now - Duration::minutes(10), 10.0),
+                &Provider::Codex,
+            )
             .expect("record codex");
         store
             .record_snapshot(&make_snapshot(now, 20.0), &Provider::Codex)
@@ -962,7 +1044,10 @@ mod tests {
         let now = Utc::now();
 
         store
-            .record_snapshot(&make_snapshot(now - Duration::hours(2), 10.0), &Provider::Codex)
+            .record_snapshot(
+                &make_snapshot(now - Duration::hours(2), 10.0),
+                &Provider::Codex,
+            )
             .expect("record old");
         store
             .record_snapshot(&make_snapshot(now, 30.0), &Provider::Codex)
@@ -983,10 +1068,16 @@ mod tests {
         let now = Utc::now();
 
         store
-            .record_snapshot(&make_snapshot(now - Duration::hours(1), 10.0), &Provider::Codex)
+            .record_snapshot(
+                &make_snapshot(now - Duration::hours(1), 10.0),
+                &Provider::Codex,
+            )
             .expect("record 1");
         store
-            .record_snapshot(&make_snapshot(now - Duration::minutes(10), 30.0), &Provider::Codex)
+            .record_snapshot(
+                &make_snapshot(now - Duration::minutes(10), 30.0),
+                &Provider::Codex,
+            )
             .expect("record 2");
 
         let stats = store
@@ -1001,5 +1092,86 @@ mod tests {
         let store = open_temp_store();
         let deleted = store.cleanup_default().expect("cleanup");
         assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn prune_aggregates_old_snapshots() {
+        let store = open_temp_store();
+        let now = Utc::now();
+        let old_date = now - Duration::days(10);
+
+        // Insert old snapshot (10 days old)
+        store
+            .record_snapshot(&make_snapshot(old_date, 50.0), &Provider::Codex)
+            .expect("record old");
+
+        // Insert new snapshot (1 day old)
+        store
+            .record_snapshot(
+                &make_snapshot(now - Duration::days(1), 60.0),
+                &Provider::Codex,
+            )
+            .expect("record new");
+
+        // Policy: keep detailed for 5 days
+        let policy = RetentionPolicy::default().with_detailed_days(5);
+
+        let result = store.prune(&policy, false).expect("prune");
+
+        assert_eq!(result.detailed_deleted, 1);
+        assert_eq!(result.aggregates_created, 1);
+
+        // Verify detailed counts
+        let detailed_count = store
+            .count_rows("usage_snapshots")
+            .expect("count snapshots");
+        assert_eq!(detailed_count, 1); // Only the new one remains
+
+        // Verify aggregate counts
+        let agg_count = store
+            .count_rows("daily_aggregates")
+            .expect("count aggregates");
+        assert_eq!(agg_count, 1);
+
+        // Verify aggregate data directly.
+        let agg_row: f64 = store
+            .conn
+            .query_row(
+                "SELECT primary_avg_used_pct FROM daily_aggregates",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query aggregate");
+
+        assert!((agg_row - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn maybe_prune_respects_interval() {
+        let store = open_temp_store();
+        let policy = RetentionPolicy::default()
+            .with_detailed_days(5)
+            .with_aggregate_days(10);
+
+        // First run should happen (no history)
+        let result1 = store.maybe_prune(&policy).expect("maybe prune 1");
+        assert!(result1.is_some());
+
+        // Second run immediately after should be skipped
+        let result2 = store.maybe_prune(&policy).expect("maybe prune 2");
+        assert!(result2.is_none());
+
+        // Force update last prune time to be old
+        store
+            .conn
+            .execute(
+                "UPDATE prune_history SET pruned_at = ?1",
+                [(Utc::now() - Duration::hours(25)).to_rfc3339()],
+            )
+            .expect("update prune time");
+
+        // Third run should happen
+        let result3 = store.maybe_prune(&policy).expect("maybe prune 3");
+        assert!(result3.is_some());
     }
 }

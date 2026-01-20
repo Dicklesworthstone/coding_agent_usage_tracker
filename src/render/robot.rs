@@ -289,7 +289,13 @@ mod tests {
 
         let data = &parsed["data"][0];
         // Optional fields should be null or not present
-        assert!(data["account"].is_null() || !parsed["data"][0].as_object().unwrap().contains_key("account"));
+        assert!(
+            data["account"].is_null()
+                || !parsed["data"][0]
+                    .as_object()
+                    .unwrap()
+                    .contains_key("account")
+        );
         assert!(data["credits"].is_null());
         assert!(data["status"].is_null());
     }

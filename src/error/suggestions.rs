@@ -99,19 +99,20 @@ pub fn install_commands_for_cli(name: &str) -> Vec<String> {
             "# GitHub Copilot is a VS Code / IDE extension".to_string(),
             "code --install-extension GitHub.copilot".to_string(),
         ],
-        "windsurf" | "codeium" => vec![
-            "# Download Windsurf from: https://codeium.com/windsurf".to_string(),
-        ],
+        "windsurf" | "codeium" => {
+            vec!["# Download Windsurf from: https://codeium.com/windsurf".to_string()]
+        }
         "roo" | "roo-cline" => vec![
             "# Roo Cline is a VS Code extension".to_string(),
             "code --install-extension RooCline.roo-cline".to_string(),
         ],
-        "amp" | "sourcegraph" => vec![
-            "# Download Amp from: https://sourcegraph.com/amp".to_string(),
-        ],
-        _ => vec![
-            format!("# Install {} following its official documentation", name),
-        ],
+        "amp" | "sourcegraph" => {
+            vec!["# Download Amp from: https://sourcegraph.com/amp".to_string()]
+        }
+        _ => vec![format!(
+            "# Install {} following its official documentation",
+            name
+        )],
     }
 }
 
@@ -160,20 +161,18 @@ pub fn auth_expired_suggestions(provider: &str) -> Vec<FixSuggestion> {
 /// Generates fix suggestions for authentication not configured errors.
 #[must_use]
 pub fn auth_not_configured_suggestions(provider: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("caut auth login {}", provider),
-                format!("caut setup {}", provider),
-            ],
-            format!(
-                "No credentials found for {}. This provider requires authentication \
+    vec![FixSuggestion::new(
+        vec![
+            format!("caut auth login {}", provider),
+            format!("caut setup {}", provider),
+        ],
+        format!(
+            "No credentials found for {}. This provider requires authentication \
                  to access usage data. You may need to complete the OAuth flow or \
                  provide an API key.",
-                provider
-            ),
+            provider
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for invalid authentication errors.
@@ -204,7 +203,11 @@ pub fn timeout_suggestions(provider: &str, seconds: u64) -> Vec<FixSuggestion> {
     vec![
         FixSuggestion::new(
             vec![
-                format!("caut usage --provider {} --timeout {}", provider, seconds * 2),
+                format!(
+                    "caut usage --provider {} --timeout {}",
+                    provider,
+                    seconds * 2
+                ),
                 "caut doctor".to_string(),
             ],
             format!(
@@ -293,10 +296,7 @@ pub fn connection_refused_suggestions(host: &str) -> Vec<FixSuggestion> {
 pub fn config_not_found_suggestions(path: &str) -> Vec<FixSuggestion> {
     vec![
         FixSuggestion::new(
-            vec![
-                "caut config init".to_string(),
-                format!("touch {}", path),
-            ],
+            vec!["caut config init".to_string(), format!("touch {}", path)],
             format!(
                 "Configuration file not found at {}. This file is needed for caut \
                  to know which providers to query and how to authenticate.",
@@ -309,7 +309,11 @@ pub fn config_not_found_suggestions(path: &str) -> Vec<FixSuggestion> {
 
 /// Generates fix suggestions for config parse errors.
 #[must_use]
-pub fn config_parse_suggestions(path: &str, line: Option<usize>, message: &str) -> Vec<FixSuggestion> {
+pub fn config_parse_suggestions(
+    path: &str,
+    line: Option<usize>,
+    message: &str,
+) -> Vec<FixSuggestion> {
     let line_info = line.map_or(String::new(), |l| format!(" on line {}", l));
     vec![
         FixSuggestion::new(
@@ -333,18 +337,16 @@ pub fn config_parse_suggestions(path: &str, line: Option<usize>, message: &str) 
 /// Generates fix suggestions for invalid config value errors.
 #[must_use]
 pub fn config_invalid_suggestions(key: &str, value: &str, message: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("caut config set {} <valid_value>", key),
-                "caut config show".to_string(),
-            ],
-            format!(
-                "Invalid config value for '{}': '{}'. {}",
-                key, value, message
-            ),
+    vec![FixSuggestion::new(
+        vec![
+            format!("caut config set {} <valid_value>", key),
+            "caut config show".to_string(),
+        ],
+        format!(
+            "Invalid config value for '{}': '{}'. {}",
+            key, value, message
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for rate limit errors.
@@ -356,7 +358,13 @@ pub fn rate_limited_suggestions(
 ) -> Vec<FixSuggestion> {
     let wait_cmd = retry_after.map_or_else(
         || "# Wait before retrying".to_string(),
-        |d| format!("sleep {} && caut usage --provider {}", d.as_secs(), provider),
+        |d| {
+            format!(
+                "sleep {} && caut usage --provider {}",
+                d.as_secs(),
+                provider
+            )
+        },
     );
 
     let wait_info = retry_after.map_or_else(
@@ -409,18 +417,16 @@ pub fn provider_api_error_suggestions(
     message: &str,
 ) -> Vec<FixSuggestion> {
     let status_info = status_code.map_or(String::new(), |c| format!(" (HTTP {})", c));
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("caut doctor --provider {}", provider),
-                "caut auth status".to_string(),
-            ],
-            format!(
-                "The {} API returned an error{}: {}",
-                provider, status_info, message
-            ),
+    vec![FixSuggestion::new(
+        vec![
+            format!("caut doctor --provider {}", provider),
+            "caut auth status".to_string(),
+        ],
+        format!(
+            "The {} API returned an error{}: {}",
+            provider, status_info, message
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for CLI not found errors.
@@ -448,142 +454,119 @@ pub fn cli_not_found_suggestions(name: &str) -> Vec<FixSuggestion> {
 /// Generates fix suggestions for permission denied errors.
 #[must_use]
 pub fn permission_denied_suggestions(path: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("ls -la {}", path),
-                format!("chmod 644 {}", path),
-                format!("# Or: sudo chown $USER {}", path),
-            ],
-            format!(
-                "Permission denied accessing {}. The file or directory may have \
+    vec![FixSuggestion::new(
+        vec![
+            format!("ls -la {}", path),
+            format!("chmod 644 {}", path),
+            format!("# Or: sudo chown $USER {}", path),
+        ],
+        format!(
+            "Permission denied accessing {}. The file or directory may have \
                  restrictive permissions or be owned by another user.",
-                path
-            ),
+            path
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for missing environment variable errors.
 #[must_use]
 pub fn env_var_missing_suggestions(name: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("export {}=\"your_value_here\"", name),
-                format!("# Or add to ~/.bashrc: export {}=\"...\"", name),
-            ],
-            format!(
-                "The environment variable {} is required but not set. This may be \
+    vec![FixSuggestion::new(
+        vec![
+            format!("export {}=\"your_value_here\"", name),
+            format!("# Or add to ~/.bashrc: export {}=\"...\"", name),
+        ],
+        format!(
+            "The environment variable {} is required but not set. This may be \
                  needed for authentication or configuration.",
-                name
-            ),
+            name
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for invalid provider errors.
 #[must_use]
 pub fn invalid_provider_suggestions(name: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                "caut providers list".to_string(),
-                "caut usage --help".to_string(),
-            ],
-            format!(
-                "Unknown provider: '{}'. Use `caut providers list` to see available \
+    vec![FixSuggestion::new(
+        vec![
+            "caut providers list".to_string(),
+            "caut usage --help".to_string(),
+        ],
+        format!(
+            "Unknown provider: '{}'. Use `caut providers list` to see available \
                  providers.",
-                name
-            ),
+            name
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for unsupported source type errors.
 #[must_use]
 pub fn unsupported_source_suggestions(provider: &str, source_type: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("caut providers show {}", provider),
-            ],
-            format!(
-                "The source type '{}' is not supported for provider {}. Check which \
+    vec![FixSuggestion::new(
+        vec![format!("caut providers show {}", provider)],
+        format!(
+            "The source type '{}' is not supported for provider {}. Check which \
                  sources are available for this provider.",
-                source_type, provider
-            ),
+            source_type, provider
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for fetch failed errors.
 #[must_use]
 pub fn fetch_failed_suggestions(provider: &str, reason: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("caut doctor --provider {}", provider),
-                "caut auth status".to_string(),
-            ],
-            format!(
-                "Failed to fetch usage data from {}: {}",
-                provider, reason
-            ),
-        ),
-    ]
+    vec![FixSuggestion::new(
+        vec![
+            format!("caut doctor --provider {}", provider),
+            "caut auth status".to_string(),
+        ],
+        format!("Failed to fetch usage data from {}: {}", provider, reason),
+    )]
 }
 
 /// Generates fix suggestions for no available strategy errors.
 #[must_use]
 pub fn no_strategy_suggestions(provider: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("caut auth login {}", provider),
-                format!("caut setup {}", provider),
-            ],
-            format!(
-                "No fetch strategy is available for {}. This usually means the CLI \
+    vec![FixSuggestion::new(
+        vec![
+            format!("caut auth login {}", provider),
+            format!("caut setup {}", provider),
+        ],
+        format!(
+            "No fetch strategy is available for {}. This usually means the CLI \
                  is not installed and no web/API authentication is configured.",
-                provider
-            ),
+            provider
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for account not found errors.
 #[must_use]
 pub fn account_not_found_suggestions(account: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                "caut accounts list".to_string(),
-                "caut auth status".to_string(),
-            ],
-            format!(
-                "Account '{}' not found. Use `caut accounts list` to see configured \
+    vec![FixSuggestion::new(
+        vec![
+            "caut accounts list".to_string(),
+            "caut auth status".to_string(),
+        ],
+        format!(
+            "Account '{}' not found. Use `caut accounts list` to see configured \
                  accounts.",
-                account
-            ),
+            account
         ),
-    ]
+    )]
 }
 
 /// Generates fix suggestions for no accounts configured errors.
 #[must_use]
 pub fn no_accounts_suggestions(provider: &str) -> Vec<FixSuggestion> {
-    vec![
-        FixSuggestion::new(
-            vec![
-                format!("caut auth login {}", provider),
-            ],
-            format!(
-                "No accounts are configured for {}. Set up authentication first.",
-                provider
-            ),
+    vec![FixSuggestion::new(
+        vec![format!("caut auth login {}", provider)],
+        format!(
+            "No accounts are configured for {}. Set up authentication first.",
+            provider
         ),
-    ]
+    )]
 }
 
 // =============================================================================
@@ -596,13 +579,10 @@ mod tests {
 
     #[test]
     fn fix_suggestion_builder() {
-        let suggestion = FixSuggestion::new(
-            vec!["cmd1".to_string()],
-            "Test context",
-        )
-        .with_prevention("Prevent tip")
-        .with_doc_url("https://example.com")
-        .auto_fixable();
+        let suggestion = FixSuggestion::new(vec!["cmd1".to_string()], "Test context")
+            .with_prevention("Prevent tip")
+            .with_doc_url("https://example.com")
+            .auto_fixable();
 
         assert_eq!(suggestion.commands, vec!["cmd1"]);
         assert_eq!(suggestion.context, "Test context");
@@ -650,11 +630,8 @@ mod tests {
 
     #[test]
     fn rate_limit_suggestions_include_retry_info() {
-        let suggestions = rate_limited_suggestions(
-            "claude",
-            Some(Duration::from_secs(60)),
-            "Too many requests",
-        );
+        let suggestions =
+            rate_limited_suggestions("claude", Some(Duration::from_secs(60)), "Too many requests");
         assert!(!suggestions.is_empty());
         assert!(suggestions[0].context.contains("60 seconds"));
     }
@@ -663,7 +640,12 @@ mod tests {
     fn cli_not_found_suggestions_have_install_commands() {
         let suggestions = cli_not_found_suggestions("claude");
         assert!(!suggestions.is_empty());
-        assert!(suggestions[0].commands.iter().any(|c| c.contains("npm install")));
+        assert!(
+            suggestions[0]
+                .commands
+                .iter()
+                .any(|c| c.contains("npm install"))
+        );
         assert!(suggestions[0].doc_url.is_some());
     }
 }

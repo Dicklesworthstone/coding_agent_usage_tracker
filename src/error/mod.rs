@@ -126,59 +126,41 @@ pub enum CautError {
     // ==========================================================================
     /// Authentication token has expired and needs refresh.
     #[error("authentication expired for {provider}")]
-    AuthExpired {
-        provider: String,
-    },
+    AuthExpired { provider: String },
 
     /// Authentication is not configured for the provider.
     #[error("authentication not configured for {provider}")]
-    AuthNotConfigured {
-        provider: String,
-    },
+    AuthNotConfigured { provider: String },
 
     /// Authentication credentials are invalid.
     #[error("invalid credentials for {provider}: {reason}")]
-    AuthInvalid {
-        provider: String,
-        reason: String,
-    },
+    AuthInvalid { provider: String, reason: String },
 
     // ==========================================================================
     // Network errors (Category: Network)
     // ==========================================================================
     /// Request timed out after specified duration.
     #[error("request timeout after {seconds}s for {provider}")]
-    TimeoutWithProvider {
-        provider: String,
-        seconds: u64,
-    },
+    TimeoutWithProvider { provider: String, seconds: u64 },
 
     /// DNS resolution failed.
     #[error("DNS resolution failed for {host}")]
-    DnsFailure {
-        host: String,
-    },
+    DnsFailure { host: String },
 
     /// SSL/TLS handshake or certificate error.
     #[error("SSL/TLS error: {message}")]
-    SslError {
-        message: String,
-    },
+    SslError { message: String },
 
     /// Connection refused by remote server.
     #[error("connection refused: {host}")]
-    ConnectionRefused {
-        host: String,
-    },
+    ConnectionRefused { host: String },
 
     // ==========================================================================
     // Configuration errors (Category: Configuration)
     // ==========================================================================
     /// Configuration file not found at expected path.
     #[error("config file not found: {path}")]
-    ConfigNotFound {
-        path: String,
-    },
+    ConfigNotFound { path: String },
 
     /// Error parsing configuration file.
     #[error("config parse error at {path}: {message}")]
@@ -209,10 +191,7 @@ pub enum CautError {
 
     /// Provider service is temporarily unavailable.
     #[error("provider {provider} unavailable: {message}")]
-    ProviderUnavailable {
-        provider: String,
-        message: String,
-    },
+    ProviderUnavailable { provider: String, message: String },
 
     /// Provider API returned an error.
     #[error("provider {provider} API error: {message}")]
@@ -227,21 +206,15 @@ pub enum CautError {
     // ==========================================================================
     /// Required CLI tool not found in PATH.
     #[error("CLI tool not found: {name}")]
-    CliNotFound {
-        name: String,
-    },
+    CliNotFound { name: String },
 
     /// Permission denied accessing file or resource.
     #[error("permission denied: {path}")]
-    PermissionDenied {
-        path: String,
-    },
+    PermissionDenied { path: String },
 
     /// Required environment variable not set.
     #[error("environment variable not set: {name}")]
-    EnvVarMissing {
-        name: String,
-    },
+    EnvVarMissing { name: String },
 
     // ==========================================================================
     // Legacy errors (maintained for backward compatibility)
@@ -350,8 +323,7 @@ impl CautError {
     pub const fn exit_code(&self) -> ExitCode {
         match self {
             // Environment errors -> Binary not found
-            Self::ProviderNotFound(_)
-            | Self::CliNotFound { .. } => ExitCode::BinaryNotFound,
+            Self::ProviderNotFound(_) | Self::CliNotFound { .. } => ExitCode::BinaryNotFound,
 
             // Configuration and parse errors -> Parse error
             Self::Config(_)
@@ -372,8 +344,7 @@ impl CautError {
             | Self::AuthInvalid { .. } => ExitCode::ParseError,
 
             // Timeout errors
-            Self::Timeout(_)
-            | Self::TimeoutWithProvider { .. } => ExitCode::Timeout,
+            Self::Timeout(_) | Self::TimeoutWithProvider { .. } => ExitCode::Timeout,
 
             // Everything else -> General error
             Self::AuthExpired { .. }
@@ -441,9 +412,7 @@ impl CautError {
             | Self::EnvVarMissing { .. } => ErrorCategory::Environment,
 
             // Internal errors
-            Self::Io(_)
-            | Self::Json(_)
-            | Self::Other(_) => ErrorCategory::Internal,
+            Self::Io(_) | Self::Json(_) | Self::Other(_) => ErrorCategory::Internal,
         }
     }
 
@@ -520,12 +489,12 @@ impl CautError {
         matches!(
             self,
             Self::Timeout(_)
-            | Self::TimeoutWithProvider { .. }
-            | Self::Network(_)
-            | Self::ConnectionRefused { .. }
-            | Self::DnsFailure { .. }
-            | Self::RateLimited { .. }
-            | Self::ProviderUnavailable { .. }
+                | Self::TimeoutWithProvider { .. }
+                | Self::Network(_)
+                | Self::ConnectionRefused { .. }
+                | Self::DnsFailure { .. }
+                | Self::RateLimited { .. }
+                | Self::ProviderUnavailable { .. }
         )
     }
 
@@ -585,9 +554,7 @@ impl CautError {
     pub fn fix_suggestions(&self) -> Vec<FixSuggestion> {
         match self {
             // Authentication errors
-            Self::AuthExpired { provider } => {
-                suggestions::auth_expired_suggestions(provider)
-            }
+            Self::AuthExpired { provider } => suggestions::auth_expired_suggestions(provider),
             Self::AuthNotConfigured { provider } => {
                 suggestions::auth_not_configured_suggestions(provider)
             }
@@ -596,21 +563,13 @@ impl CautError {
             }
 
             // Network errors
-            Self::Timeout(seconds) => {
-                suggestions::timeout_suggestions("unknown", *seconds)
-            }
+            Self::Timeout(seconds) => suggestions::timeout_suggestions("unknown", *seconds),
             Self::TimeoutWithProvider { provider, seconds } => {
                 suggestions::timeout_suggestions(provider, *seconds)
             }
-            Self::DnsFailure { host } => {
-                suggestions::dns_failure_suggestions(host)
-            }
-            Self::SslError { message } => {
-                suggestions::ssl_error_suggestions(message)
-            }
-            Self::ConnectionRefused { host } => {
-                suggestions::connection_refused_suggestions(host)
-            }
+            Self::DnsFailure { host } => suggestions::dns_failure_suggestions(host),
+            Self::SslError { message } => suggestions::ssl_error_suggestions(message),
+            Self::ConnectionRefused { host } => suggestions::connection_refused_suggestions(host),
             Self::Network(msg) => {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
@@ -619,27 +578,28 @@ impl CautError {
             }
 
             // Configuration errors
-            Self::ConfigNotFound { path } => {
-                suggestions::config_not_found_suggestions(path)
-            }
-            Self::ConfigParse { path, line, message } => {
-                suggestions::config_parse_suggestions(path, *line, message)
-            }
-            Self::ConfigInvalid { key, value, message } => {
-                suggestions::config_invalid_suggestions(key, value, message)
-            }
+            Self::ConfigNotFound { path } => suggestions::config_not_found_suggestions(path),
+            Self::ConfigParse {
+                path,
+                line,
+                message,
+            } => suggestions::config_parse_suggestions(path, *line, message),
+            Self::ConfigInvalid {
+                key,
+                value,
+                message,
+            } => suggestions::config_invalid_suggestions(key, value, message),
             Self::Config(msg) => {
                 vec![FixSuggestion::new(
                     vec!["caut config show".to_string()],
                     format!("Configuration error: {}", msg),
                 )]
             }
-            Self::InvalidProvider(name) => {
-                suggestions::invalid_provider_suggestions(name)
-            }
-            Self::UnsupportedSource { provider, source_type } => {
-                suggestions::unsupported_source_suggestions(provider, source_type)
-            }
+            Self::InvalidProvider(name) => suggestions::invalid_provider_suggestions(name),
+            Self::UnsupportedSource {
+                provider,
+                source_type,
+            } => suggestions::unsupported_source_suggestions(provider, source_type),
             Self::AccountRequiresSingleProvider => {
                 vec![FixSuggestion::new(
                     vec!["caut usage --provider <provider> --account <account>".to_string()],
@@ -658,36 +618,40 @@ impl CautError {
             Self::ProviderNoTokenAccounts(provider) => {
                 vec![FixSuggestion::new(
                     vec![format!("caut providers show {}", provider)],
-                    format!("Provider {} does not support multiple token accounts.", provider),
+                    format!(
+                        "Provider {} does not support multiple token accounts.",
+                        provider
+                    ),
                 )]
             }
-            Self::AccountNotFound(account) => {
-                suggestions::account_not_found_suggestions(account)
-            }
-            Self::NoAccountsConfigured(provider) => {
-                suggestions::no_accounts_suggestions(provider)
-            }
+            Self::AccountNotFound(account) => suggestions::account_not_found_suggestions(account),
+            Self::NoAccountsConfigured(provider) => suggestions::no_accounts_suggestions(provider),
 
             // Provider errors
-            Self::RateLimited { provider, retry_after, message } => {
-                suggestions::rate_limited_suggestions(provider, *retry_after, message)
-            }
+            Self::RateLimited {
+                provider,
+                retry_after,
+                message,
+            } => suggestions::rate_limited_suggestions(provider, *retry_after, message),
             Self::ProviderUnavailable { provider, message } => {
                 suggestions::provider_unavailable_suggestions(provider, message)
             }
-            Self::ProviderApiError { provider, status_code, message } => {
-                suggestions::provider_api_error_suggestions(provider, *status_code, message)
-            }
+            Self::ProviderApiError {
+                provider,
+                status_code,
+                message,
+            } => suggestions::provider_api_error_suggestions(provider, *status_code, message),
             Self::FetchFailed { provider, reason } => {
                 suggestions::fetch_failed_suggestions(provider, reason)
             }
-            Self::NoAvailableStrategy(provider) => {
-                suggestions::no_strategy_suggestions(provider)
-            }
+            Self::NoAvailableStrategy(provider) => suggestions::no_strategy_suggestions(provider),
             Self::ParseResponse(msg) => {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
-                    format!("Failed to parse provider response: {}. This may indicate an API change.", msg),
+                    format!(
+                        "Failed to parse provider response: {}. This may indicate an API change.",
+                        msg
+                    ),
                 )]
             }
             Self::MissingRateLimit => {
@@ -699,35 +663,36 @@ impl CautError {
             Self::PartialFailure { failed } => {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
-                    format!("{} provider(s) failed. Run diagnostics to identify issues.", failed),
+                    format!(
+                        "{} provider(s) failed. Run diagnostics to identify issues.",
+                        failed
+                    ),
                 )]
             }
 
             // Environment errors
-            Self::CliNotFound { name } => {
-                suggestions::cli_not_found_suggestions(name)
-            }
-            Self::ProviderNotFound(name) => {
-                suggestions::cli_not_found_suggestions(name)
-            }
-            Self::PermissionDenied { path } => {
-                suggestions::permission_denied_suggestions(path)
-            }
-            Self::EnvVarMissing { name } => {
-                suggestions::env_var_missing_suggestions(name)
-            }
+            Self::CliNotFound { name } => suggestions::cli_not_found_suggestions(name),
+            Self::ProviderNotFound(name) => suggestions::cli_not_found_suggestions(name),
+            Self::PermissionDenied { path } => suggestions::permission_denied_suggestions(path),
+            Self::EnvVarMissing { name } => suggestions::env_var_missing_suggestions(name),
 
             // Internal errors - generic suggestions
             Self::Io(err) => {
                 vec![FixSuggestion::new(
                     vec!["# Check file permissions and disk space".to_string()],
-                    format!("I/O error: {}. Check file permissions and available disk space.", err),
+                    format!(
+                        "I/O error: {}. Check file permissions and available disk space.",
+                        err
+                    ),
                 )]
             }
             Self::Json(err) => {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
-                    format!("JSON parsing error: {}. The data may be corrupted or in an unexpected format.", err),
+                    format!(
+                        "JSON parsing error: {}. The data may be corrupted or in an unexpected format.",
+                        err
+                    ),
                 )]
             }
             Self::Other(err) => {
@@ -757,11 +722,20 @@ mod tests {
 
     #[test]
     fn error_category_description() {
-        assert_eq!(ErrorCategory::Authentication.description(), "Authentication error");
+        assert_eq!(
+            ErrorCategory::Authentication.description(),
+            "Authentication error"
+        );
         assert_eq!(ErrorCategory::Network.description(), "Network error");
-        assert_eq!(ErrorCategory::Configuration.description(), "Configuration error");
+        assert_eq!(
+            ErrorCategory::Configuration.description(),
+            "Configuration error"
+        );
         assert_eq!(ErrorCategory::Provider.description(), "Provider error");
-        assert_eq!(ErrorCategory::Environment.description(), "Environment error");
+        assert_eq!(
+            ErrorCategory::Environment.description(),
+            "Environment error"
+        );
         assert_eq!(ErrorCategory::Internal.description(), "Internal error");
     }
 
@@ -777,7 +751,10 @@ mod tests {
 
     #[test]
     fn error_category_display() {
-        assert_eq!(format!("{}", ErrorCategory::Authentication), "Authentication error");
+        assert_eq!(
+            format!("{}", ErrorCategory::Authentication),
+            "Authentication error"
+        );
         assert_eq!(format!("{}", ErrorCategory::Network), "Network error");
     }
 
@@ -787,10 +764,14 @@ mod tests {
 
     #[test]
     fn authentication_errors_have_correct_category() {
-        let err = CautError::AuthExpired { provider: "claude".to_string() };
+        let err = CautError::AuthExpired {
+            provider: "claude".to_string(),
+        };
         assert_eq!(err.category(), ErrorCategory::Authentication);
 
-        let err = CautError::AuthNotConfigured { provider: "codex".to_string() };
+        let err = CautError::AuthNotConfigured {
+            provider: "codex".to_string(),
+        };
         assert_eq!(err.category(), ErrorCategory::Authentication);
 
         let err = CautError::AuthInvalid {
@@ -811,7 +792,9 @@ mod tests {
         };
         assert_eq!(err.category(), ErrorCategory::Network);
 
-        let err = CautError::DnsFailure { host: "api.example.com".to_string() };
+        let err = CautError::DnsFailure {
+            host: "api.example.com".to_string(),
+        };
         assert_eq!(err.category(), ErrorCategory::Network);
 
         let err = CautError::Network("Connection reset".to_string());
@@ -823,7 +806,9 @@ mod tests {
         let err = CautError::Config("Invalid setting".to_string());
         assert_eq!(err.category(), ErrorCategory::Configuration);
 
-        let err = CautError::ConfigNotFound { path: "/etc/caut/config.toml".to_string() };
+        let err = CautError::ConfigNotFound {
+            path: "/etc/caut/config.toml".to_string(),
+        };
         assert_eq!(err.category(), ErrorCategory::Configuration);
 
         let err = CautError::InvalidProvider("unknown".to_string());
@@ -848,13 +833,17 @@ mod tests {
 
     #[test]
     fn environment_errors_have_correct_category() {
-        let err = CautError::CliNotFound { name: "codex".to_string() };
+        let err = CautError::CliNotFound {
+            name: "codex".to_string(),
+        };
         assert_eq!(err.category(), ErrorCategory::Environment);
 
         let err = CautError::ProviderNotFound("claude".to_string());
         assert_eq!(err.category(), ErrorCategory::Environment);
 
-        let err = CautError::PermissionDenied { path: "/etc/secret".to_string() };
+        let err = CautError::PermissionDenied {
+            path: "/etc/secret".to_string(),
+        };
         assert_eq!(err.category(), ErrorCategory::Environment);
     }
 
@@ -875,7 +864,9 @@ mod tests {
     fn error_codes_follow_format() {
         // All error codes should start with "CAUT-"
         let errors: Vec<CautError> = vec![
-            CautError::AuthExpired { provider: "test".to_string() },
+            CautError::AuthExpired {
+                provider: "test".to_string(),
+            },
             CautError::Timeout(30),
             CautError::Config("test".to_string()),
             CautError::RateLimited {
@@ -883,13 +874,23 @@ mod tests {
                 retry_after: None,
                 message: "test".to_string(),
             },
-            CautError::CliNotFound { name: "test".to_string() },
+            CautError::CliNotFound {
+                name: "test".to_string(),
+            },
         ];
 
         for err in errors {
             let code = err.error_code();
-            assert!(code.starts_with("CAUT-"), "Error code {} should start with CAUT-", code);
-            assert!(code.len() >= 9, "Error code {} should be at least 9 chars", code);
+            assert!(
+                code.starts_with("CAUT-"),
+                "Error code {} should start with CAUT-",
+                code
+            );
+            assert!(
+                code.len() >= 9,
+                "Error code {} should be at least 9 chars",
+                code
+            );
         }
     }
 
@@ -898,23 +899,71 @@ mod tests {
         use std::collections::HashSet;
 
         let codes: Vec<&str> = vec![
-            CautError::AuthExpired { provider: "".to_string() }.error_code(),
-            CautError::AuthNotConfigured { provider: "".to_string() }.error_code(),
-            CautError::AuthInvalid { provider: "".to_string(), reason: "".to_string() }.error_code(),
+            CautError::AuthExpired {
+                provider: "".to_string(),
+            }
+            .error_code(),
+            CautError::AuthNotConfigured {
+                provider: "".to_string(),
+            }
+            .error_code(),
+            CautError::AuthInvalid {
+                provider: "".to_string(),
+                reason: "".to_string(),
+            }
+            .error_code(),
             CautError::Timeout(0).error_code(),
-            CautError::TimeoutWithProvider { provider: "".to_string(), seconds: 0 }.error_code(),
-            CautError::DnsFailure { host: "".to_string() }.error_code(),
-            CautError::SslError { message: "".to_string() }.error_code(),
-            CautError::ConnectionRefused { host: "".to_string() }.error_code(),
+            CautError::TimeoutWithProvider {
+                provider: "".to_string(),
+                seconds: 0,
+            }
+            .error_code(),
+            CautError::DnsFailure {
+                host: "".to_string(),
+            }
+            .error_code(),
+            CautError::SslError {
+                message: "".to_string(),
+            }
+            .error_code(),
+            CautError::ConnectionRefused {
+                host: "".to_string(),
+            }
+            .error_code(),
             CautError::Network("".to_string()).error_code(),
-            CautError::ConfigNotFound { path: "".to_string() }.error_code(),
-            CautError::ConfigParse { path: "".to_string(), line: None, message: "".to_string() }.error_code(),
-            CautError::ConfigInvalid { key: "".to_string(), value: "".to_string(), message: "".to_string() }.error_code(),
+            CautError::ConfigNotFound {
+                path: "".to_string(),
+            }
+            .error_code(),
+            CautError::ConfigParse {
+                path: "".to_string(),
+                line: None,
+                message: "".to_string(),
+            }
+            .error_code(),
+            CautError::ConfigInvalid {
+                key: "".to_string(),
+                value: "".to_string(),
+                message: "".to_string(),
+            }
+            .error_code(),
             CautError::Config("".to_string()).error_code(),
             CautError::InvalidProvider("".to_string()).error_code(),
-            CautError::RateLimited { provider: "".to_string(), retry_after: None, message: "".to_string() }.error_code(),
-            CautError::ProviderUnavailable { provider: "".to_string(), message: "".to_string() }.error_code(),
-            CautError::CliNotFound { name: "".to_string() }.error_code(),
+            CautError::RateLimited {
+                provider: "".to_string(),
+                retry_after: None,
+                message: "".to_string(),
+            }
+            .error_code(),
+            CautError::ProviderUnavailable {
+                provider: "".to_string(),
+                message: "".to_string(),
+            }
+            .error_code(),
+            CautError::CliNotFound {
+                name: "".to_string(),
+            }
+            .error_code(),
             CautError::ProviderNotFound("".to_string()).error_code(),
         ];
 
@@ -930,20 +979,29 @@ mod tests {
     fn retryable_errors() {
         // These should be retryable
         assert!(CautError::Timeout(30).is_retryable());
-        assert!(CautError::TimeoutWithProvider {
-            provider: "test".to_string(),
-            seconds: 30,
-        }.is_retryable());
+        assert!(
+            CautError::TimeoutWithProvider {
+                provider: "test".to_string(),
+                seconds: 30,
+            }
+            .is_retryable()
+        );
         assert!(CautError::Network("reset".to_string()).is_retryable());
-        assert!(CautError::RateLimited {
-            provider: "test".to_string(),
-            retry_after: None,
-            message: "".to_string(),
-        }.is_retryable());
-        assert!(CautError::ProviderUnavailable {
-            provider: "test".to_string(),
-            message: "".to_string(),
-        }.is_retryable());
+        assert!(
+            CautError::RateLimited {
+                provider: "test".to_string(),
+                retry_after: None,
+                message: "".to_string(),
+            }
+            .is_retryable()
+        );
+        assert!(
+            CautError::ProviderUnavailable {
+                provider: "test".to_string(),
+                message: "".to_string(),
+            }
+            .is_retryable()
+        );
     }
 
     #[test]
@@ -951,11 +1009,19 @@ mod tests {
         // These should NOT be retryable
         assert!(!CautError::Config("test".to_string()).is_retryable());
         assert!(!CautError::InvalidProvider("test".to_string()).is_retryable());
-        assert!(!CautError::AuthInvalid {
-            provider: "test".to_string(),
-            reason: "bad token".to_string(),
-        }.is_retryable());
-        assert!(!CautError::CliNotFound { name: "test".to_string() }.is_retryable());
+        assert!(
+            !CautError::AuthInvalid {
+                provider: "test".to_string(),
+                reason: "bad token".to_string(),
+            }
+            .is_retryable()
+        );
+        assert!(
+            !CautError::CliNotFound {
+                name: "test".to_string()
+            }
+            .is_retryable()
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -987,7 +1053,9 @@ mod tests {
 
     #[test]
     fn provider_extraction() {
-        let err = CautError::AuthExpired { provider: "claude".to_string() };
+        let err = CautError::AuthExpired {
+            provider: "claude".to_string(),
+        };
         assert_eq!(err.provider(), Some("claude"));
 
         let err = CautError::FetchFailed {
@@ -1015,19 +1083,41 @@ mod tests {
 
     #[test]
     fn exit_codes_are_correct() {
-        assert_eq!(CautError::ProviderNotFound("test".to_string()).exit_code(), ExitCode::BinaryNotFound);
-        assert_eq!(CautError::CliNotFound { name: "test".to_string() }.exit_code(), ExitCode::BinaryNotFound);
+        assert_eq!(
+            CautError::ProviderNotFound("test".to_string()).exit_code(),
+            ExitCode::BinaryNotFound
+        );
+        assert_eq!(
+            CautError::CliNotFound {
+                name: "test".to_string()
+            }
+            .exit_code(),
+            ExitCode::BinaryNotFound
+        );
 
-        assert_eq!(CautError::Config("test".to_string()).exit_code(), ExitCode::ParseError);
-        assert_eq!(CautError::InvalidProvider("test".to_string()).exit_code(), ExitCode::ParseError);
+        assert_eq!(
+            CautError::Config("test".to_string()).exit_code(),
+            ExitCode::ParseError
+        );
+        assert_eq!(
+            CautError::InvalidProvider("test".to_string()).exit_code(),
+            ExitCode::ParseError
+        );
 
         assert_eq!(CautError::Timeout(30).exit_code(), ExitCode::Timeout);
-        assert_eq!(CautError::TimeoutWithProvider {
-            provider: "test".to_string(),
-            seconds: 30,
-        }.exit_code(), ExitCode::Timeout);
+        assert_eq!(
+            CautError::TimeoutWithProvider {
+                provider: "test".to_string(),
+                seconds: 30,
+            }
+            .exit_code(),
+            ExitCode::Timeout
+        );
 
-        assert_eq!(CautError::Network("test".to_string()).exit_code(), ExitCode::GeneralError);
+        assert_eq!(
+            CautError::Network("test".to_string()).exit_code(),
+            ExitCode::GeneralError
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1038,38 +1128,87 @@ mod tests {
     fn all_error_variants_have_suggestions() {
         // Every error should have at least one suggestion
         let errors: Vec<CautError> = vec![
-            CautError::AuthExpired { provider: "claude".to_string() },
-            CautError::AuthNotConfigured { provider: "codex".to_string() },
-            CautError::AuthInvalid { provider: "gemini".to_string(), reason: "invalid".to_string() },
+            CautError::AuthExpired {
+                provider: "claude".to_string(),
+            },
+            CautError::AuthNotConfigured {
+                provider: "codex".to_string(),
+            },
+            CautError::AuthInvalid {
+                provider: "gemini".to_string(),
+                reason: "invalid".to_string(),
+            },
             CautError::Timeout(30),
-            CautError::TimeoutWithProvider { provider: "claude".to_string(), seconds: 30 },
-            CautError::DnsFailure { host: "api.example.com".to_string() },
-            CautError::SslError { message: "certificate error".to_string() },
-            CautError::ConnectionRefused { host: "localhost:8080".to_string() },
+            CautError::TimeoutWithProvider {
+                provider: "claude".to_string(),
+                seconds: 30,
+            },
+            CautError::DnsFailure {
+                host: "api.example.com".to_string(),
+            },
+            CautError::SslError {
+                message: "certificate error".to_string(),
+            },
+            CautError::ConnectionRefused {
+                host: "localhost:8080".to_string(),
+            },
             CautError::Network("reset".to_string()),
-            CautError::ConfigNotFound { path: "/etc/caut/config.toml".to_string() },
-            CautError::ConfigParse { path: "config.toml".to_string(), line: Some(10), message: "syntax error".to_string() },
-            CautError::ConfigInvalid { key: "timeout".to_string(), value: "abc".to_string(), message: "must be number".to_string() },
+            CautError::ConfigNotFound {
+                path: "/etc/caut/config.toml".to_string(),
+            },
+            CautError::ConfigParse {
+                path: "config.toml".to_string(),
+                line: Some(10),
+                message: "syntax error".to_string(),
+            },
+            CautError::ConfigInvalid {
+                key: "timeout".to_string(),
+                value: "abc".to_string(),
+                message: "must be number".to_string(),
+            },
             CautError::Config("invalid".to_string()),
             CautError::InvalidProvider("unknown".to_string()),
-            CautError::UnsupportedSource { provider: "claude".to_string(), source_type: "ftp".to_string() },
+            CautError::UnsupportedSource {
+                provider: "claude".to_string(),
+                source_type: "ftp".to_string(),
+            },
             CautError::AccountRequiresSingleProvider,
             CautError::AllAccountsConflict,
             CautError::ProviderNoTokenAccounts("codex".to_string()),
             CautError::AccountNotFound("work".to_string()),
             CautError::NoAccountsConfigured("claude".to_string()),
-            CautError::RateLimited { provider: "claude".to_string(), retry_after: Some(Duration::from_secs(60)), message: "too many".to_string() },
-            CautError::ProviderUnavailable { provider: "codex".to_string(), message: "down".to_string() },
-            CautError::ProviderApiError { provider: "claude".to_string(), status_code: Some(500), message: "error".to_string() },
-            CautError::FetchFailed { provider: "gemini".to_string(), reason: "network".to_string() },
+            CautError::RateLimited {
+                provider: "claude".to_string(),
+                retry_after: Some(Duration::from_secs(60)),
+                message: "too many".to_string(),
+            },
+            CautError::ProviderUnavailable {
+                provider: "codex".to_string(),
+                message: "down".to_string(),
+            },
+            CautError::ProviderApiError {
+                provider: "claude".to_string(),
+                status_code: Some(500),
+                message: "error".to_string(),
+            },
+            CautError::FetchFailed {
+                provider: "gemini".to_string(),
+                reason: "network".to_string(),
+            },
             CautError::NoAvailableStrategy("claude".to_string()),
             CautError::ParseResponse("unexpected".to_string()),
             CautError::MissingRateLimit,
             CautError::PartialFailure { failed: 2 },
-            CautError::CliNotFound { name: "claude".to_string() },
+            CautError::CliNotFound {
+                name: "claude".to_string(),
+            },
             CautError::ProviderNotFound("codex".to_string()),
-            CautError::PermissionDenied { path: "/etc/secret".to_string() },
-            CautError::EnvVarMissing { name: "CLAUDE_API_KEY".to_string() },
+            CautError::PermissionDenied {
+                path: "/etc/secret".to_string(),
+            },
+            CautError::EnvVarMissing {
+                name: "CLAUDE_API_KEY".to_string(),
+            },
         ];
 
         for err in errors {
@@ -1089,23 +1228,33 @@ mod tests {
 
     #[test]
     fn suggestions_include_provider_in_commands() {
-        let err = CautError::AuthExpired { provider: "claude".to_string() };
+        let err = CautError::AuthExpired {
+            provider: "claude".to_string(),
+        };
         let suggestions = err.fix_suggestions();
 
         assert!(!suggestions.is_empty());
         // At least one command should mention the provider
         let has_provider_cmd = suggestions[0].commands.iter().any(|c| c.contains("claude"));
-        assert!(has_provider_cmd, "Suggestions should include provider-specific commands");
+        assert!(
+            has_provider_cmd,
+            "Suggestions should include provider-specific commands"
+        );
     }
 
     #[test]
     fn cli_not_found_has_install_commands() {
-        let err = CautError::CliNotFound { name: "claude".to_string() };
+        let err = CautError::CliNotFound {
+            name: "claude".to_string(),
+        };
         let suggestions = err.fix_suggestions();
 
         assert!(!suggestions.is_empty());
         // Should have npm install or similar
-        let has_install = suggestions[0].commands.iter().any(|c| c.contains("install"));
+        let has_install = suggestions[0]
+            .commands
+            .iter()
+            .any(|c| c.contains("install"));
         assert!(has_install, "CliNotFound should have install commands");
     }
 
@@ -1160,7 +1309,9 @@ mod tests {
     #[test]
     fn suggestions_have_prevention_tips_where_appropriate() {
         // Auth expired should have prevention tips
-        let err = CautError::AuthExpired { provider: "claude".to_string() };
+        let err = CautError::AuthExpired {
+            provider: "claude".to_string(),
+        };
         let suggestions = err.fix_suggestions();
 
         assert!(!suggestions.is_empty());

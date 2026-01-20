@@ -140,7 +140,10 @@ fn cost_json_format_flag_works() {
 
     // Should be valid JSON
     let result: Result<serde_json::Value, _> = serde_json::from_str(&stdout_str);
-    assert!(result.is_ok(), "Output should be valid JSON with --format json");
+    assert!(
+        result.is_ok(),
+        "Output should be valid JSON with --format json"
+    );
 
     log.finish_ok();
 }
@@ -489,10 +492,7 @@ fn cost_json_has_errors_array() {
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str) {
         let errors = json.get("errors");
         assert!(errors.is_some(), "JSON output should have 'errors' field");
-        assert!(
-            errors.unwrap().is_array(),
-            "'errors' should be an array"
-        );
+        assert!(errors.unwrap().is_array(), "'errors' should be an array");
     }
 
     log.finish_ok();
@@ -545,10 +545,7 @@ fn cost_json_no_color_combined() {
     assert!(result.is_ok(), "Combined flags should produce valid JSON");
 
     // No ANSI codes
-    assert!(
-        !stdout_str.contains('\x1b'),
-        "No ANSI codes in JSON output"
-    );
+    assert!(!stdout_str.contains('\x1b'), "No ANSI codes in JSON output");
 
     log.finish_ok();
 }
@@ -630,14 +627,8 @@ fn cost_json_meta_present() {
         assert!(meta.is_some(), "JSON should have 'meta' object");
 
         if let Some(meta) = meta {
-            assert!(
-                meta.get("format").is_some(),
-                "meta should have 'format'"
-            );
-            assert!(
-                meta.get("runtime").is_some(),
-                "meta should have 'runtime'"
-            );
+            assert!(meta.get("format").is_some(), "meta should have 'format'");
+            assert!(meta.get("runtime").is_some(), "meta should have 'runtime'");
         }
     }
 
@@ -670,11 +661,7 @@ fn cost_json_daily_entries_valid() {
                         // Check date format (YYYY-MM-DD)
                         if let Some(date) = entry.get("date").and_then(|d| d.as_str()) {
                             let parts: Vec<&str> = date.split('-').collect();
-                            assert_eq!(
-                                parts.len(),
-                                3,
-                                "Date should be YYYY-MM-DD format"
-                            );
+                            assert_eq!(parts.len(), 3, "Date should be YYYY-MM-DD format");
                             // Verify year, month, day are numeric
                             for part in parts {
                                 assert!(
@@ -686,10 +673,7 @@ fn cost_json_daily_entries_valid() {
 
                         // Check total cost is non-negative
                         if let Some(cost) = entry.get("totalCost").and_then(|c| c.as_f64()) {
-                            assert!(
-                                cost >= 0.0,
-                                "Daily cost should be non-negative"
-                            );
+                            assert!(cost >= 0.0, "Daily cost should be non-negative");
                         }
                     }
                 }

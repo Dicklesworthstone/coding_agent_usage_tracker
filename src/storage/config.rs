@@ -147,7 +147,8 @@ impl ResolvedConfig {
         let no_color = Self::resolve_no_color(cli, &config, &mut sources.no_color);
         let verbose = Self::resolve_verbose(cli, &mut sources.verbose);
         let pretty = Self::resolve_pretty(cli, &config, &mut sources.pretty);
-        let include_status = Self::resolve_include_status(usage_args, &config, &mut sources.include_status);
+        let include_status =
+            Self::resolve_include_status(usage_args, &config, &mut sources.include_status);
 
         Ok(Self {
             providers,
@@ -943,11 +944,26 @@ pretty = true
 
     #[test]
     fn parse_format_valid_values() {
-        assert_eq!(ResolvedConfig::parse_format("human").unwrap(), OutputFormat::Human);
-        assert_eq!(ResolvedConfig::parse_format("json").unwrap(), OutputFormat::Json);
-        assert_eq!(ResolvedConfig::parse_format("md").unwrap(), OutputFormat::Md);
-        assert_eq!(ResolvedConfig::parse_format("markdown").unwrap(), OutputFormat::Md);
-        assert_eq!(ResolvedConfig::parse_format("JSON").unwrap(), OutputFormat::Json);
+        assert_eq!(
+            ResolvedConfig::parse_format("human").unwrap(),
+            OutputFormat::Human
+        );
+        assert_eq!(
+            ResolvedConfig::parse_format("json").unwrap(),
+            OutputFormat::Json
+        );
+        assert_eq!(
+            ResolvedConfig::parse_format("md").unwrap(),
+            OutputFormat::Md
+        );
+        assert_eq!(
+            ResolvedConfig::parse_format("markdown").unwrap(),
+            OutputFormat::Md
+        );
+        assert_eq!(
+            ResolvedConfig::parse_format("JSON").unwrap(),
+            OutputFormat::Json
+        );
     }
 
     #[test]
@@ -1085,7 +1101,7 @@ pretty = true
     fn env_no_color_std_override() {
         remove_env(ENV_CONFIG);
         remove_env(ENV_NO_COLOR);
-        set_env(ENV_NO_COLOR_STD, "");  // Any value works for NO_COLOR standard
+        set_env(ENV_NO_COLOR_STD, ""); // Any value works for NO_COLOR standard
 
         let cli = make_test_cli();
         let resolved = ResolvedConfig::resolve(&cli, None).unwrap();
@@ -1130,7 +1146,7 @@ pretty = true
         set_env(ENV_FORMAT, "md");
 
         let mut cli = make_test_cli();
-        cli.json = true;  // --json flag explicitly set
+        cli.json = true; // --json flag explicitly set
 
         let resolved = ResolvedConfig::resolve(&cli, None).unwrap();
 
@@ -1149,7 +1165,7 @@ pretty = true
         remove_env(ENV_CONFIG);
         set_env(ENV_FORMAT, "md");
 
-        let cli = make_test_cli();  // format = Human (default)
+        let cli = make_test_cli(); // format = Human (default)
 
         let resolved = ResolvedConfig::resolve(&cli, None).unwrap();
 
@@ -1302,10 +1318,7 @@ pretty = false
         assert!(config.general.include_status);
 
         // Providers section
-        assert_eq!(
-            config.providers.default_providers,
-            vec!["claude", "codex"]
-        );
+        assert_eq!(config.providers.default_providers, vec!["claude", "codex"]);
         assert!(config.providers.claude.enabled);
         assert!(!config.providers.codex.enabled);
 
@@ -1364,9 +1377,9 @@ timeout_seconds = 45
         assert_eq!(config.general.timeout_seconds, 45);
 
         // Default values for unspecified fields
-        assert!(!config.general.include_status);  // default is false
-        assert!(config.output.color);             // default is true
-        assert!(!config.output.pretty);           // default is false
+        assert!(!config.general.include_status); // default is false
+        assert!(config.output.color); // default is true
+        assert!(!config.output.pretty); // default is false
         assert!(config.providers.claude.enabled); // default is true
     }
 
@@ -1415,10 +1428,7 @@ pretty = true
     #[test]
     fn validate_valid_provider_names() {
         let mut config = Config::default();
-        config.providers.default_providers = vec![
-            "claude".to_string(),
-            "codex".to_string(),
-        ];
+        config.providers.default_providers = vec!["claude".to_string(), "codex".to_string()];
 
         assert!(config.validate().is_ok());
     }

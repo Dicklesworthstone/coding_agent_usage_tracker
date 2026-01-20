@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use caut::core::http::{build_client, fetch_json, DEFAULT_TIMEOUT};
+use caut::core::http::{DEFAULT_TIMEOUT, build_client, fetch_json};
 use caut::error::CautError;
 
 use common::logger::TestLogger;
@@ -66,7 +66,9 @@ async fn fetch_json_success_with_valid_json() {
     let url = format!("{}/api/test", mock_server.uri());
     log.http_request("GET", &url);
 
-    let result: TestPayload = fetch_json(&client, &url).await.expect("fetch should succeed");
+    let result: TestPayload = fetch_json(&client, &url)
+        .await
+        .expect("fetch should succeed");
 
     log.phase("verify");
     assert_eq!(result, payload);
@@ -94,7 +96,9 @@ async fn fetch_json_success_with_minimal_json() {
     log.phase("execute");
     let client = build_client(DEFAULT_TIMEOUT).expect("client build");
     let url = format!("{}/api/minimal", mock_server.uri());
-    let result: TestPayload = fetch_json(&client, &url).await.expect("fetch should succeed");
+    let result: TestPayload = fetch_json(&client, &url)
+        .await
+        .expect("fetch should succeed");
 
     log.phase("verify");
     assert_eq!(result.status, "ok");
@@ -131,7 +135,9 @@ async fn fetch_json_with_rate_limit_headers() {
     log.phase("execute");
     let client = build_client(DEFAULT_TIMEOUT).expect("client build");
     let url = format!("{}/api/rate-limit", mock_server.uri());
-    let result: RateLimitResponse = fetch_json(&client, &url).await.expect("fetch should succeed");
+    let result: RateLimitResponse = fetch_json(&client, &url)
+        .await
+        .expect("fetch should succeed");
 
     log.phase("verify");
     assert_eq!(result.used, 50);
@@ -462,7 +468,10 @@ async fn fetch_json_timeout_on_slow_response() {
         CautError::Timeout(secs) => {
             // Note: The implementation uses DEFAULT_TIMEOUT in the error regardless of actual timeout
             // The important thing is that we got a Timeout error, not the specific value
-            log.debug(&format!("Got expected timeout error (reports {} seconds)", secs));
+            log.debug(&format!(
+                "Got expected timeout error (reports {} seconds)",
+                secs
+            ));
         }
         other => panic!("Expected Timeout error, got: {:?}", other),
     }
@@ -545,7 +554,10 @@ async fn fetch_json_sends_user_agent() {
     // Expect User-Agent header containing "caut/"
     Mock::given(method("GET"))
         .and(path("/api/ua"))
-        .and(header("User-Agent", format!("caut/{}", env!("CARGO_PKG_VERSION")).as_str()))
+        .and(header(
+            "User-Agent",
+            format!("caut/{}", env!("CARGO_PKG_VERSION")).as_str(),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(&payload))
         .mount(&mock_server)
         .await;
@@ -553,7 +565,9 @@ async fn fetch_json_sends_user_agent() {
     log.phase("execute");
     let client = build_client(DEFAULT_TIMEOUT).expect("client build");
     let url = format!("{}/api/ua", mock_server.uri());
-    let result: TestPayload = fetch_json(&client, &url).await.expect("request should match UA");
+    let result: TestPayload = fetch_json(&client, &url)
+        .await
+        .expect("request should match UA");
 
     log.phase("verify");
     assert_eq!(result.status, "ok");
@@ -597,10 +611,17 @@ async fn fetch_json_claude_rate_limit_format() {
     log.phase("execute");
     let client = build_client(DEFAULT_TIMEOUT).expect("client build");
     let url = format!("{}/v1/rate_limit", mock_server.uri());
-    let result: serde_json::Value = fetch_json(&client, &url).await.expect("fetch should succeed");
+    let result: serde_json::Value = fetch_json(&client, &url)
+        .await
+        .expect("fetch should succeed");
 
     log.phase("verify");
-    assert!(result["rate_limit"]["requests"]["remaining"].as_i64().unwrap() == 70);
+    assert!(
+        result["rate_limit"]["requests"]["remaining"]
+            .as_i64()
+            .unwrap()
+            == 70
+    );
     log.finish_ok();
 }
 
@@ -636,7 +657,9 @@ async fn fetch_json_openai_rate_limit_format() {
     log.phase("execute");
     let client = build_client(DEFAULT_TIMEOUT).expect("client build");
     let url = format!("{}/dashboard/user/api_keys", mock_server.uri());
-    let result: serde_json::Value = fetch_json(&client, &url).await.expect("fetch should succeed");
+    let result: serde_json::Value = fetch_json(&client, &url)
+        .await
+        .expect("fetch should succeed");
 
     log.phase("verify");
     assert!(result["user"]["email"].as_str().unwrap() == "test@example.com");
@@ -681,7 +704,9 @@ async fn fetch_json_statuspage_format() {
     log.phase("execute");
     let client = build_client(DEFAULT_TIMEOUT).expect("client build");
     let url = format!("{}/api/v2/status.json", mock_server.uri());
-    let result: serde_json::Value = fetch_json(&client, &url).await.expect("fetch should succeed");
+    let result: serde_json::Value = fetch_json(&client, &url)
+        .await
+        .expect("fetch should succeed");
 
     log.phase("verify");
     assert_eq!(result["status"]["indicator"].as_str().unwrap(), "none");

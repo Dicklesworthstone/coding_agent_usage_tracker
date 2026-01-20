@@ -5,8 +5,8 @@
 use crate::cli::args::{HistoryCommand, HistoryPruneArgs, OutputFormat};
 use crate::error::Result;
 use crate::storage::{
-    AppPaths, HistoryStore, RetentionPolicy, DEFAULT_AGGREGATE_RETENTION_DAYS,
-    DEFAULT_DETAILED_RETENTION_DAYS, DEFAULT_MAX_SIZE_BYTES,
+    AppPaths, DEFAULT_AGGREGATE_RETENTION_DAYS, DEFAULT_DETAILED_RETENTION_DAYS,
+    DEFAULT_MAX_SIZE_BYTES, HistoryStore, RetentionPolicy,
 };
 
 /// Execute history commands.
@@ -115,7 +115,11 @@ fn execute_prune(args: &HistoryPruneArgs, format: OutputFormat, pretty: bool) ->
             );
             println!(
                 "| Daily aggregates {} | {} |",
-                if result.dry_run { "would be created" } else { "created" },
+                if result.dry_run {
+                    "would be created"
+                } else {
+                    "created"
+                },
                 result.aggregates_created
             );
             println!(
@@ -132,9 +136,18 @@ fn execute_prune(args: &HistoryPruneArgs, format: OutputFormat, pretty: bool) ->
                 println!("| Bytes freed | {} |", format_bytes(result.bytes_freed));
             }
             println!("\n## Policy\n");
-            println!("- Keep detailed snapshots: {} days", policy.detailed_retention_days);
-            println!("- Keep daily aggregates: {} days", policy.aggregate_retention_days);
-            println!("- Max database size: {}", format_bytes(policy.max_size_bytes));
+            println!(
+                "- Keep detailed snapshots: {} days",
+                policy.detailed_retention_days
+            );
+            println!(
+                "- Keep daily aggregates: {} days",
+                policy.aggregate_retention_days
+            );
+            println!(
+                "- Max database size: {}",
+                format_bytes(policy.max_size_bytes)
+            );
         }
         OutputFormat::Human => {
             if result.dry_run {
@@ -145,17 +158,29 @@ fn execute_prune(args: &HistoryPruneArgs, format: OutputFormat, pretty: bool) ->
             println!("---------------------");
             println!(
                 "Detailed snapshots {}: {}",
-                if result.dry_run { "to delete" } else { "deleted" },
+                if result.dry_run {
+                    "to delete"
+                } else {
+                    "deleted"
+                },
                 result.detailed_deleted
             );
             println!(
                 "Daily aggregates {}: {}",
-                if result.dry_run { "to create" } else { "created" },
+                if result.dry_run {
+                    "to create"
+                } else {
+                    "created"
+                },
                 result.aggregates_created
             );
             println!(
                 "Old aggregates {}: {}",
-                if result.dry_run { "to delete" } else { "deleted" },
+                if result.dry_run {
+                    "to delete"
+                } else {
+                    "deleted"
+                },
                 result.aggregates_deleted
             );
             println!("Duration: {} ms", result.duration_ms);
@@ -165,14 +190,25 @@ fn execute_prune(args: &HistoryPruneArgs, format: OutputFormat, pretty: bool) ->
             }
 
             if result.size_limit_triggered {
-                println!("\nSize limit ({}) was exceeded and triggered additional cleanup.",
-                    format_bytes(policy.max_size_bytes));
+                println!(
+                    "\nSize limit ({}) was exceeded and triggered additional cleanup.",
+                    format_bytes(policy.max_size_bytes)
+                );
             }
 
             println!("\nPolicy:");
-            println!("  Keep detailed snapshots: {} days", policy.detailed_retention_days);
-            println!("  Keep daily aggregates: {} days", policy.aggregate_retention_days);
-            println!("  Max database size: {}", format_bytes(policy.max_size_bytes));
+            println!(
+                "  Keep detailed snapshots: {} days",
+                policy.detailed_retention_days
+            );
+            println!(
+                "  Keep daily aggregates: {} days",
+                policy.aggregate_retention_days
+            );
+            println!(
+                "  Max database size: {}",
+                format_bytes(policy.max_size_bytes)
+            );
         }
     }
 
@@ -245,8 +281,14 @@ fn execute_stats(format: OutputFormat, pretty: bool) -> Result<()> {
             println!("| Daily aggregates | {} |", aggregate_count);
             println!("| Prune operations | {} |", prune_count);
             println!("\n## Default Retention Policy\n");
-            println!("- Detailed retention: {} days", DEFAULT_DETAILED_RETENTION_DAYS);
-            println!("- Aggregate retention: {} days", DEFAULT_AGGREGATE_RETENTION_DAYS);
+            println!(
+                "- Detailed retention: {} days",
+                DEFAULT_DETAILED_RETENTION_DAYS
+            );
+            println!(
+                "- Aggregate retention: {} days",
+                DEFAULT_AGGREGATE_RETENTION_DAYS
+            );
             println!("- Max size: {}", format_bytes(DEFAULT_MAX_SIZE_BYTES));
         }
         OutputFormat::Human => {

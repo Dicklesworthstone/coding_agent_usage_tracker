@@ -89,11 +89,9 @@ fn ensure_schema_migrations_table(conn: &Connection) -> Result<()> {
 
 fn get_schema_version(conn: &Connection) -> Result<i32> {
     let version: Option<i32> = conn
-        .query_row(
-            "SELECT MAX(version) FROM schema_migrations",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+            row.get(0)
+        })
         .map_err(|e| CautError::Other(anyhow::anyhow!("read schema version: {e}")))?;
 
     Ok(version.unwrap_or(0))
@@ -104,17 +102,30 @@ fn apply_migration(conn: &mut Connection, migration: &Migration) -> Result<()> {
         .transaction()
         .map_err(|e| CautError::Other(anyhow::anyhow!("begin migration: {e}")))?;
 
-    tx.execute_batch(migration.sql)
-        .map_err(|e| CautError::Other(anyhow::anyhow!("apply migration {}: {e}", migration.version)))?;
+    tx.execute_batch(migration.sql).map_err(|e| {
+        CautError::Other(anyhow::anyhow!(
+            "apply migration {}: {e}",
+            migration.version
+        ))
+    })?;
 
     tx.execute(
         "INSERT INTO schema_migrations (version) VALUES (?1)",
         [migration.version],
     )
-    .map_err(|e| CautError::Other(anyhow::anyhow!("record migration {}: {e}", migration.version)))?;
+    .map_err(|e| {
+        CautError::Other(anyhow::anyhow!(
+            "record migration {}: {e}",
+            migration.version
+        ))
+    })?;
 
-    tx.commit()
-        .map_err(|e| CautError::Other(anyhow::anyhow!("commit migration {}: {e}", migration.version)))?;
+    tx.commit().map_err(|e| {
+        CautError::Other(anyhow::anyhow!(
+            "commit migration {}: {e}",
+            migration.version
+        ))
+    })?;
 
     Ok(())
 }
@@ -132,7 +143,7 @@ mod tests {
         let mut conn = open_in_memory();
         let version = run_migrations(&mut conn).expect("run migrations");
 
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
 
         let table_exists: i32 = conn
             .query_row(
@@ -159,13 +170,15 @@ mod tests {
         let version_first = run_migrations(&mut conn).expect("first run");
         let version_second = run_migrations(&mut conn).expect("second run");
 
-        assert_eq!(version_first, 1);
-        assert_eq!(version_second, 1);
+        assert_eq!(version_first, 2);
+        assert_eq!(version_second, 2);
 
         let count: i32 = conn
-            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
             .expect("count migrations");
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
     }
 
     #[test]

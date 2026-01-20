@@ -153,7 +153,10 @@ fn usage_json_format_flag_works() {
 
     // Should be valid JSON
     let result: Result<serde_json::Value, _> = serde_json::from_str(&stdout_str);
-    assert!(result.is_ok(), "Output should be valid JSON with --format json");
+    assert!(
+        result.is_ok(),
+        "Output should be valid JSON with --format json"
+    );
 
     log.finish_ok();
 }
@@ -411,10 +414,7 @@ fn usage_json_has_errors_array() {
         // Errors should be an array (possibly empty)
         let errors = json.get("errors");
         assert!(errors.is_some(), "JSON output should have 'errors' field");
-        assert!(
-            errors.unwrap().is_array(),
-            "'errors' should be an array"
-        );
+        assert!(errors.unwrap().is_array(), "'errors' should be an array");
     }
 
     log.finish_ok();
@@ -494,10 +494,7 @@ fn usage_json_no_color_combined() {
     assert!(result.is_ok(), "Combined flags should produce valid JSON");
 
     // No ANSI codes
-    assert!(
-        !stdout_str.contains('\x1b'),
-        "No ANSI codes in JSON output"
-    );
+    assert!(!stdout_str.contains('\x1b'), "No ANSI codes in JSON output");
 
     log.finish_ok();
 }
@@ -582,14 +579,8 @@ fn usage_json_meta_present() {
 
         if let Some(meta) = meta {
             // Meta should have format and runtime
-            assert!(
-                meta.get("format").is_some(),
-                "meta should have 'format'"
-            );
-            assert!(
-                meta.get("runtime").is_some(),
-                "meta should have 'runtime'"
-            );
+            assert!(meta.get("format").is_some(), "meta should have 'format'");
+            assert!(meta.get("runtime").is_some(), "meta should have 'runtime'");
         }
     }
 

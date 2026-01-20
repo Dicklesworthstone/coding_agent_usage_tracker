@@ -19,7 +19,7 @@ fn segments_to_string(segments: &[Segment], no_color: bool) -> String {
         .iter()
         .map(|seg| {
             if no_color || seg.style.is_none() {
-                seg.text.clone()
+                seg.text.to_string()
             } else {
                 seg.style.as_ref().unwrap().render(&seg.text, color_system)
             }
@@ -129,7 +129,11 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
 }
 
 /// Format rate window as styled segments with progress bar.
-fn format_rate_window_segments(label: &str, window: &RateWindow, no_color: bool) -> Vec<Segment> {
+fn format_rate_window_segments<'a>(
+    label: &'a str,
+    window: &'a RateWindow,
+    no_color: bool,
+) -> Vec<Segment<'a>> {
     let remaining = window.remaining_percent();
     let reset = window
         .reset_description
@@ -565,8 +569,7 @@ mod tests {
 
     #[test]
     fn format_status_with_description() {
-        let segments =
-            format_status_segments(StatusIndicator::Major, Some("API is down"), true);
+        let segments = format_status_segments(StatusIndicator::Major, Some("API is down"), true);
         let text: String = segments.iter().map(|s| s.text.clone()).collect();
 
         assert_contains!(&text, "– API is down");

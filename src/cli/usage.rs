@@ -8,6 +8,7 @@ use crate::core::provider::ProviderSelection;
 use crate::core::status::StatusFetcher;
 use crate::error::{CautError, Result};
 use crate::render::{human, robot};
+use crate::storage::{AppPaths, HistoryStore, RetentionPolicy};
 use tokio::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -25,6 +26,14 @@ pub async fn execute(
 ) -> Result<()> {
     // Validate arguments
     args.validate()?;
+
+    // Prune history on startup
+    let paths = AppPaths::new();
+    if let Ok(store) = HistoryStore::open(&paths.history_db_file()) {
+        if let Err(e) = store.maybe_prune(&RetentionPolicy::default()) {
+            tracing::warn!("Failed to prune history: {}", e);
+        }
+    }
 
     if args.watch {
         let interval = Duration::from_secs(args.interval);
@@ -79,9 +88,18 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
     let mut payloads = Vec::new();
     let mut errors = Vec::new();
 
+    let paths = AppPaths::new();
+
     for outcome in outcomes {
         match outcome.result {
             Ok(snapshot) => {
+                // Record to history
+                if let Ok(store) = HistoryStore::open(&paths.history_db_file()) {
+                    if let Err(e) = store.record_snapshot(&snapshot, &outcome.provider) {
+                        tracing::warn!("Failed to record snapshot: {}", e);
+                    }
+                }
+
                 // Get status if requested
                 let status = if let Some(ref fetcher) = status_fetcher {
                     if let Some(status_url) = outcome.provider.status_page_url() {

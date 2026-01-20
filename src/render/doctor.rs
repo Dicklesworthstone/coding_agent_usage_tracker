@@ -241,7 +241,7 @@ fn segments_to_string(segments: &[Segment], no_color: bool) -> String {
         .iter()
         .map(|seg| {
             if no_color || seg.style.is_none() {
-                seg.text.clone()
+                seg.text.to_string()
             } else {
                 seg.style.as_ref().unwrap().render(&seg.text, color_system)
             }

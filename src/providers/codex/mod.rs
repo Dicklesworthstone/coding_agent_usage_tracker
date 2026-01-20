@@ -1116,9 +1116,7 @@ mod tests {
         let openai_auth = claims.openai_auth.expect("openai_auth present");
         assert_eq!(openai_auth.chatgpt_plan_type.as_deref(), Some("pro"));
         assert_eq!(
-            openai_auth
-                .chatgpt_subscription_active_until
-                .as_deref(),
+            openai_auth.chatgpt_subscription_active_until.as_deref(),
             Some("2026-02-01T00:00:00Z")
         );
 
