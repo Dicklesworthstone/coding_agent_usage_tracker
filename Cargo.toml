@@ -39,7 +39,7 @@ directories = "6.0.0"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native"] }
 
 # Terminal output - using rich_rust (Rust port of Python Rich)
-rich_rust = { version = "0.1", features = ["full"] }
+rich_rust = { version = "0.1", default-features = true }
 crossterm = "0.29.0"
 colored = "3.1.0"
 
@@ -69,6 +69,7 @@ wiremock = "0.6"
 tokio-test = "0.4"
 assert_cmd = "2.0"
 predicates = "3.1"
+tracing-test = "0.2"
 caut = { path = ".", features = ["test-utils"] }
 
 [profile.release]

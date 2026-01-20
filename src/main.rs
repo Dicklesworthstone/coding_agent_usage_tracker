@@ -34,8 +34,24 @@ async fn main() -> ExitCode {
         .log_level
         .as_deref()
         .and_then(logging::LogLevel::from_arg)
+        .or_else(|| logging::parse_log_level_from_env().map(logging::LogLevel::from_tracing_level))
         .unwrap_or_default();
-    logging::init(log_level, cli.json_output, cli.verbose);
+    let log_format = if cli.json_output {
+        logging::LogFormat::Json
+    } else {
+        logging::parse_log_format_from_env().unwrap_or_default()
+    };
+    let log_file = logging::parse_log_file_from_env();
+    logging::init(log_level, log_format, log_file, cli.verbose);
+
+    let format = cli.effective_format();
+    let _rich_enabled = caut::rich::should_use_rich_output(format, cli.no_color);
+
+    if cli.debug_rich {
+        let diagnostics = caut::rich::collect_rich_diagnostics(format, cli.no_color);
+        println!("{}", diagnostics);
+        return ExitCode::SUCCESS;
+    }
 
     // Execute command
     let result = run(cli).await;

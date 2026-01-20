@@ -6,6 +6,8 @@ use crate::core::doctor::{CheckStatus, DiagnosticCheck, DoctorReport, ProviderHe
 use crate::error::Result;
 use rich_rust::prelude::*;
 use rich_rust::{Color, ColorSystem, Segment, Style};
+use std::time::Instant;
+use tracing::Level;
 
 // =============================================================================
 // Human-Readable Output
@@ -13,6 +15,12 @@ use rich_rust::{Color, ColorSystem, Segment, Style};
 
 /// Render a doctor report for human consumption.
 pub fn render_human(report: &DoctorReport, no_color: bool) -> Result<String> {
+    let start = if tracing::enabled!(Level::DEBUG) {
+        Some(Instant::now())
+    } else {
+        None
+    };
+    let _theme = crate::rich::get_theme();
     let mut output = String::new();
 
     // Header
@@ -36,6 +44,14 @@ pub fn render_human(report: &DoctorReport, no_color: bool) -> Result<String> {
 
     // Summary
     output.push_str(&render_summary(report, no_color));
+
+    if let Some(start) = start {
+        tracing::debug!(
+            component = "doctor_report",
+            render_time_ms = start.elapsed().as_millis(),
+            "Rendered doctor report"
+        );
+    }
 
     Ok(output)
 }

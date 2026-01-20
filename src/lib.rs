@@ -13,6 +13,7 @@ pub mod core;
 pub mod error;
 pub mod providers;
 pub mod render;
+pub mod rich;
 pub mod storage;
 pub mod util;
 

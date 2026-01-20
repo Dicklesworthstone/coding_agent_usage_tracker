@@ -6,6 +6,8 @@ use crate::core::models::{CostPayload, ProviderPayload, RateWindow, StatusIndica
 use crate::error::Result;
 use rich_rust::prelude::*;
 use rich_rust::{Color, ColorSystem, Segment, Style};
+use std::time::Instant;
+use tracing::Level;
 
 /// Convert segments to a styled string with ANSI codes.
 fn segments_to_string(segments: &[Segment], no_color: bool) -> String {
@@ -40,6 +42,7 @@ fn percentage_color(percent: f64) -> Color {
 
 /// Render usage results for human consumption.
 pub fn render_usage(results: &[ProviderPayload], no_color: bool) -> Result<String> {
+    let _theme = crate::rich::get_theme();
     let mut output = String::new();
 
     for payload in results {
@@ -52,6 +55,11 @@ pub fn render_usage(results: &[ProviderPayload], no_color: bool) -> Result<Strin
 
 /// Render a single provider's usage.
 fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
+    let start = if tracing::enabled!(Level::DEBUG) {
+        Some(Instant::now())
+    } else {
+        None
+    };
     let mut content_lines: Vec<Vec<Segment>> = Vec::new();
 
     // Primary window
@@ -125,7 +133,18 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
     }
 
     let segments = panel.render(60);
-    segments_to_string(&segments, no_color)
+    let rendered = segments_to_string(&segments, no_color);
+
+    if let Some(start) = start {
+        tracing::debug!(
+            component = "usage_panel",
+            provider = %payload.provider,
+            render_time_ms = start.elapsed().as_millis(),
+            "Rendered usage panel"
+        );
+    }
+
+    rendered
 }
 
 /// Format rate window as styled segments with progress bar.
@@ -216,9 +235,15 @@ fn format_status_segments(
 
 /// Render cost results for human consumption.
 pub fn render_cost(results: &[CostPayload], no_color: bool) -> Result<String> {
+    let _theme = crate::rich::get_theme();
     let mut output = String::new();
 
     for payload in results {
+        let start = if tracing::enabled!(Level::DEBUG) {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let mut content_lines: Vec<Vec<Segment>> = Vec::new();
 
         // Today's usage
@@ -263,7 +288,16 @@ pub fn render_cost(results: &[CostPayload], no_color: bool) -> Result<String> {
         }
 
         let segments = panel.render(50);
-        output.push_str(&segments_to_string(&segments, no_color));
+        let rendered = segments_to_string(&segments, no_color);
+        output.push_str(&rendered);
+        if let Some(start) = start {
+            tracing::debug!(
+                component = "cost_panel",
+                provider = %payload.provider,
+                render_time_ms = start.elapsed().as_millis(),
+                "Rendered cost panel"
+            );
+        }
         output.push('\n');
     }
 

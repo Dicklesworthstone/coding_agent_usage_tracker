@@ -42,6 +42,10 @@ pub struct Cli {
     /// Verbose output (sets log level to debug)
     #[arg(short, long, global = true)]
     pub verbose: bool,
+
+    /// Print rich output diagnostics and exit
+    #[arg(long, global = true)]
+    pub debug_rich: bool,
 }
 
 impl Cli {
