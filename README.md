@@ -254,6 +254,7 @@ OPTIONS:
     --status                    Fetch provider status
     --source <auto|web|cli|oauth>  Data source preference
     --web                       Shorthand for --source web
+    --timeout <SECONDS>         Per-provider fetch timeout override
     --web-timeout <SECONDS>     Web fetch timeout (default: 30)
 ```
 

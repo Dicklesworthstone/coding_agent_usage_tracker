@@ -155,24 +155,25 @@ async fn execute_strategy(
 
 /// Fetch multiple providers in parallel.
 pub async fn fetch_providers(providers: &[Provider], mode: SourceMode) -> Vec<FetchOutcome> {
-    fetch_providers_with_timeout(providers, mode, DEFAULT_PROVIDER_TIMEOUT).await
+    fetch_providers_with_timeout(providers, mode, None).await
 }
 
 /// Fetch multiple providers in parallel with a per-provider timeout.
 pub async fn fetch_providers_with_timeout(
     providers: &[Provider],
     mode: SourceMode,
-    timeout_duration: Duration,
+    timeout_override: Option<Duration>,
 ) -> Vec<FetchOutcome> {
     let futures: Vec<_> = providers
         .iter()
-        .map(|&p| fetch_provider_with_timeout(p, mode, timeout_duration))
+        .map(|&p| {
+            let timeout = timeout_override.unwrap_or_else(|| p.default_timeout());
+            fetch_provider_with_timeout(p, mode, timeout)
+        })
         .collect();
 
     futures::future::join_all(futures).await
 }
-
-const DEFAULT_PROVIDER_TIMEOUT: Duration = Duration::from_secs(30);
 
 async fn fetch_provider_with_timeout(
     provider: Provider,
@@ -183,7 +184,10 @@ async fn fetch_provider_with_timeout(
         Ok(outcome) => outcome,
         Err(_) => FetchOutcome::failure(
             provider,
-            CautError::Timeout(timeout_duration.as_secs()),
+            CautError::TimeoutWithProvider {
+                provider: provider.cli_name().to_string(),
+                seconds: timeout_duration.as_secs(),
+            },
             Vec::new(),
         ),
     }

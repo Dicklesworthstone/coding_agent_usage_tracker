@@ -163,6 +163,10 @@ pub struct UsageArgs {
     #[arg(long)]
     pub web: bool,
 
+    /// Timeout per provider fetch in seconds (overrides defaults)
+    #[arg(long, value_name = "SECONDS")]
+    pub timeout: Option<u64>,
+
     /// Web fetch timeout in seconds
     #[arg(long, value_name = "SECONDS")]
     pub web_timeout: Option<u64>,
@@ -190,6 +194,18 @@ impl UsageArgs {
             return Err(CautError::AllAccountsConflict);
         }
 
+        if self.timeout == Some(0) {
+            return Err(CautError::Config(
+                "Timeout must be greater than 0 seconds".to_string(),
+            ));
+        }
+
+        if self.web_timeout == Some(0) {
+            return Err(CautError::Config(
+                "Web timeout must be greater than 0 seconds".to_string(),
+            ));
+        }
+
         if self.watch && self.interval == 0 {
             return Err(CautError::Config(
                 "Watch interval must be greater than 0 seconds".to_string(),
@@ -212,6 +228,12 @@ impl UsageArgs {
             .as_deref()
             .and_then(SourceMode::from_arg)
             .unwrap_or_default()
+    }
+
+    /// Resolve timeout override (CLI --timeout takes precedence over --web-timeout).
+    #[must_use]
+    pub fn effective_timeout_override(&self) -> Option<u64> {
+        self.timeout.or(self.web_timeout)
     }
 }
 
@@ -294,6 +316,7 @@ mod tests {
             status: false,
             source: None,
             web: false,
+            timeout: None,
             web_timeout: None,
             web_debug_dump_html: false,
             watch: false,

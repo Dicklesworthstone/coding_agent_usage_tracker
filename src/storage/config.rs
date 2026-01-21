@@ -280,8 +280,12 @@ impl ResolvedConfig {
         config: &Config,
         source: &mut ConfigSource,
     ) -> Duration {
-        // 1. CLI --web-timeout flag
+        // 1. CLI --timeout or --web-timeout flag
         if let Some(args) = usage_args {
+            if let Some(timeout) = args.timeout {
+                *source = ConfigSource::Cli;
+                return Duration::from_secs(timeout);
+            }
             if let Some(timeout) = args.web_timeout {
                 *source = ConfigSource::Cli;
                 return Duration::from_secs(timeout);
@@ -784,6 +788,7 @@ pretty = true
             status: false,
             source: None,
             web: false,
+            timeout: None,
             web_timeout: None,
             web_debug_dump_html: false,
             watch: false,

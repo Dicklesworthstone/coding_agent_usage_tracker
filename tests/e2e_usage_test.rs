@@ -97,6 +97,7 @@ fn make_test_usage_args() -> UsageArgs {
         status: false,
         source: None,
         web: false,
+        timeout: None,
         web_timeout: None,
         web_debug_dump_html: false,
         watch: false,

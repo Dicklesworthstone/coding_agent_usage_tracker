@@ -72,10 +72,8 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
     tracing::debug!(?providers, ?source_mode, "Starting usage fetch");
 
     // Fetch usage data from providers
-    let timeout_secs = args.web_timeout.unwrap_or(30);
-    let outcomes =
-        fetch_providers_with_timeout(&providers, source_mode, Duration::from_secs(timeout_secs))
-            .await;
+    let timeout_override = args.effective_timeout_override().map(Duration::from_secs);
+    let outcomes = fetch_providers_with_timeout(&providers, source_mode, timeout_override).await;
 
     // Optionally fetch status
     let status_fetcher = if args.status {

@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 use crate::error::{CautError, Result};
 
@@ -144,6 +145,21 @@ impl Provider {
     #[must_use]
     pub const fn supports_cost_scan(self) -> bool {
         matches!(self, Self::Codex | Self::Claude)
+    }
+
+    /// Default timeout for provider fetch operations.
+    #[must_use]
+    pub const fn default_timeout(self) -> Duration {
+        match self {
+            // API/OAuth providers can be a bit slower
+            Self::Gemini | Self::VertexAI => Duration::from_secs(15),
+            // Local CLIs or lightweight sources
+            Self::Cursor | Self::Copilot | Self::Kiro | Self::JetBrainsAI | Self::Amp => {
+                Duration::from_secs(8)
+            }
+            // Default for most providers
+            _ => Duration::from_secs(10),
+        }
     }
 
     /// Get the status page URL for this provider.
@@ -465,5 +481,13 @@ mod tests {
         for provider in Provider::ALL {
             assert!(registry.get(*provider).is_some());
         }
+    }
+
+    #[test]
+    fn provider_default_timeout_values() {
+        assert_eq!(Provider::Claude.default_timeout().as_secs(), 10);
+        assert_eq!(Provider::Codex.default_timeout().as_secs(), 10);
+        assert_eq!(Provider::Gemini.default_timeout().as_secs(), 15);
+        assert_eq!(Provider::Cursor.default_timeout().as_secs(), 8);
     }
 }
