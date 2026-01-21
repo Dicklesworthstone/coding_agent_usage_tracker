@@ -5,8 +5,7 @@
 
 use crate::cli::args::OutputFormat;
 use crate::error::{CautError, FixSuggestion};
-use crate::rich::components::ErrorPanel;
-use crate::rich::{create_default_theme, should_use_rich_output, strip_all_formatting, ThemeConfig};
+use crate::rich::{ThemeConfig, create_default_theme, should_use_rich_output};
 use rich_rust::prelude::*;
 use rich_rust::{ColorSystem, Segment, Style};
 
@@ -23,13 +22,35 @@ use rich_rust::{ColorSystem, Segment, Style};
 /// - Not in a CI environment
 ///
 /// Otherwise falls back to simple text output.
+///
+/// When format is JSON or Md, outputs structured JSON for machine consumption.
 #[must_use]
 pub fn render_error(error: &CautError, format: OutputFormat, no_color: bool) -> String {
+    render_error_full(error, format, no_color, false)
+}
+
+/// Render an error with full control over all formatting options.
+///
+/// This is the main entry point for error rendering with explicit `pretty` control.
+/// Use this when you need to respect the `--pretty` flag for JSON output.
+#[must_use]
+pub fn render_error_full(
+    error: &CautError,
+    format: OutputFormat,
+    no_color: bool,
+    pretty: bool,
+) -> String {
+    // JSON/Md formats get structured JSON error output for AI agents
+    match format {
+        OutputFormat::Json => return render_error_json(error, pretty),
+        OutputFormat::Md => return render_error_json(error, true), // Md always pretty
+        OutputFormat::Human => {}
+    }
+
     // Check if we should use rich output (respects all safety gates)
     // Note: should_use_rich_output checks stdout, but errors go to stderr
     // We still use it for format/no_color checks but also check stderr TTY
-    let use_rich = should_use_rich_output(format, no_color)
-        && crate::util::env::stderr_is_tty();
+    let use_rich = should_use_rich_output(format, no_color) && crate::util::env::stderr_is_tty();
 
     if use_rich {
         render_rich(error)
@@ -117,10 +138,7 @@ fn render_header(error: &CautError, theme: &ThemeConfig) -> String {
 fn render_suggestions_section(suggestions: &[FixSuggestion], theme: &ThemeConfig) -> String {
     let mut lines = Vec::new();
 
-    let header = Segment::styled(
-        "How to fix:".to_string(),
-        theme.primary.clone(),
-    );
+    let header = Segment::styled("How to fix:".to_string(), theme.primary.clone());
     lines.push(segments_to_string(&[header], false));
 
     for (i, suggestion) in suggestions.iter().enumerate() {
@@ -148,10 +166,7 @@ fn render_suggestions_section(suggestions: &[FixSuggestion], theme: &ThemeConfig
 fn render_context_section(context: &str, theme: &ThemeConfig) -> String {
     let mut lines = Vec::new();
 
-    let header = Segment::styled(
-        "Why this happened:".to_string(),
-        theme.secondary.clone(),
-    );
+    let header = Segment::styled("Why this happened:".to_string(), theme.secondary.clone());
     lines.push(segments_to_string(&[header], false));
 
     // Wrap text to ~60 chars for readability
@@ -166,10 +181,7 @@ fn render_context_section(context: &str, theme: &ThemeConfig) -> String {
 fn render_prevention_section(prevention: &str, theme: &ThemeConfig) -> String {
     let mut lines = Vec::new();
 
-    let header = Segment::styled(
-        "Prevention:".to_string(),
-        theme.success.clone(),
-    );
+    let header = Segment::styled("Prevention:".to_string(), theme.success.clone());
     lines.push(segments_to_string(&[header], false));
 
     for line in wrap_text(prevention, 60) {
@@ -182,10 +194,7 @@ fn render_prevention_section(prevention: &str, theme: &ThemeConfig) -> String {
 /// Render the documentation link.
 fn render_doc_link(url: &str, theme: &ThemeConfig) -> String {
     let label = Segment::styled("Docs: ".to_string(), theme.muted.clone());
-    let link = Segment::styled(
-        url.to_string(),
-        Style::new().underline(),
-    );
+    let link = Segment::styled(url.to_string(), Style::new().underline());
     segments_to_string(&[label, link], false)
 }
 
@@ -219,11 +228,7 @@ fn render_simple(error: &CautError) -> String {
     let mut lines = Vec::new();
 
     // Header
-    lines.push(format!(
-        "Error [{}]: {}",
-        error.error_code(),
-        error
-    ));
+    lines.push(format!("Error [{}]: {}", error.error_code(), error));
 
     // First command suggestion
     if let Some(suggestion) = suggestions.first() {
@@ -358,6 +363,7 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rich::strip_all_formatting;
     use std::time::Duration;
 
     fn assert_no_ansi(s: &str) {
@@ -536,8 +542,31 @@ mod tests {
     fn render_error_json_format_returns_json() {
         let err = CautError::Timeout(30);
         let output = render_error(&err, OutputFormat::Json, false);
-        // Should be JSON when format is Json
-        assert!(output.starts_with('{') || output.starts_with("Error"));
+        // Should be valid JSON when format is Json
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed["error_code"].is_string());
+    }
+
+    #[test]
+    fn render_error_full_respects_pretty() {
+        let err = CautError::Timeout(30);
+
+        // Non-pretty should be compact (no newlines in structure)
+        let compact = render_error_full(&err, OutputFormat::Json, false, false);
+        assert!(!compact.contains("\n  "));
+
+        // Pretty should have indentation
+        let pretty = render_error_full(&err, OutputFormat::Json, false, true);
+        assert!(pretty.contains("\n  "));
+    }
+
+    #[test]
+    fn render_error_md_format_always_pretty() {
+        let err = CautError::Timeout(30);
+        let output = render_error(&err, OutputFormat::Md, false);
+        // Md format should always be pretty (indented)
+        assert!(output.contains("\n  "));
     }
 
     #[test]

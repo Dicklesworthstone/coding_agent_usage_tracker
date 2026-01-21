@@ -125,6 +125,7 @@ struct OpenAiAuthClaims {
     #[serde(default)]
     chatgpt_plan_type: Option<String>,
     /// User ID
+    #[allow(dead_code)]
     #[serde(default)]
     chatgpt_user_id: Option<String>,
     /// Subscription active start date

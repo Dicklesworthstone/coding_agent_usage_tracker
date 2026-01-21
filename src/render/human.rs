@@ -574,8 +574,7 @@ mod tests {
     use crate::test_utils::{
         make_test_cost_payload, make_test_cost_payload_minimal, make_test_credits_snapshot_minimal,
         make_test_provider_payload, make_test_provider_payload_minimal, make_test_rate_window,
-        make_test_status_major_outage, make_test_status_operational, make_test_status_payload,
-        make_test_usage_snapshot_with_tertiary,
+        make_test_status_operational, make_test_usage_snapshot_with_tertiary,
     };
     use crate::{assert_ansi_codes, assert_contains, assert_no_ansi_codes, assert_not_contains};
 

@@ -1,4 +1,5 @@
 //! Test logging infrastructure for structured test output and debugging.
+#![allow(dead_code)]
 //!
 //! Provides a `TestLogger` for structured logging during tests with support for:
 //! - Console and file output

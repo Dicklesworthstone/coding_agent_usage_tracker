@@ -9,6 +9,7 @@ use crate::cli::args::OutputFormat;
 use crate::core::doctor::DoctorReport;
 use crate::core::models::{CostPayload, ProviderPayload};
 use crate::error::Result;
+pub use human::{HistoryDay, HistoryRenderOptions, render_history_chart};
 
 /// Render usage results.
 pub fn render_usage(

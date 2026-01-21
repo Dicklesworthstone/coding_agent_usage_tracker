@@ -45,10 +45,12 @@ async fn main() -> ExitCode {
     logging::init(log_level, log_format, log_file, cli.verbose);
 
     let format = cli.effective_format();
-    let _rich_enabled = caut::rich::should_use_rich_output(format, cli.no_color);
+    let no_color = cli.no_color;
+    let pretty = cli.pretty;
+    let _rich_enabled = caut::rich::should_use_rich_output(format, no_color);
 
     if cli.debug_rich {
-        let diagnostics = caut::rich::collect_rich_diagnostics(format, cli.no_color);
+        let diagnostics = caut::rich::collect_rich_diagnostics(format, no_color);
         println!("{}", diagnostics);
         return ExitCode::SUCCESS;
     }
@@ -60,8 +62,8 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!("{}", e);
-            // Use rich error rendering (respects format, no_color, and TTY detection)
-            let error_output = caut::render::error::render_error(&e, format, cli.no_color);
+            // Use rich error rendering (respects format, no_color, TTY, and pretty)
+            let error_output = caut::render::error::render_error_full(&e, format, no_color, pretty);
             eprintln!("{}", error_output);
             ExitCode::from(e.exit_code() as u8)
         }
@@ -94,7 +96,7 @@ async fn run(cli: Cli) -> caut::Result<()> {
             caut::cli::doctor::execute(&args, format, pretty, no_color).await
         }
 
-        Some(Commands::History(cmd)) => caut::cli::history::execute(&cmd, format, pretty),
+        Some(Commands::History(cmd)) => caut::cli::history::execute(&cmd, format, pretty, no_color),
     }
 }
 

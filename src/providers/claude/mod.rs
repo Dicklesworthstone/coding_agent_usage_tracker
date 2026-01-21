@@ -160,6 +160,7 @@ fn get_local_identity() -> Option<ProviderIdentity> {
 struct ClaudeRateLimitResponse {
     #[serde(default)]
     rate_limit: Option<ClaudeRateLimit>,
+    #[allow(dead_code)]
     #[serde(default)]
     usage: Option<ClaudeUsage>,
     #[serde(default)]

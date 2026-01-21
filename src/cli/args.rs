@@ -84,10 +84,28 @@ pub enum Commands {
 /// History subcommands.
 #[derive(Subcommand, Debug)]
 pub enum HistoryCommand {
+    /// Display usage history with trend visualization
+    Show(HistoryShowArgs),
     /// Prune old history data according to retention policy
     Prune(HistoryPruneArgs),
     /// Show history database statistics
     Stats,
+}
+
+/// Arguments for `history show`.
+#[derive(Parser, Debug)]
+pub struct HistoryShowArgs {
+    /// Provider to show history for (defaults to all)
+    #[arg(short, long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// Number of days to show (default: 7)
+    #[arg(short, long, value_name = "DAYS", default_value = "7")]
+    pub days: u32,
+
+    /// Use ASCII characters instead of Unicode
+    #[arg(long)]
+    pub ascii: bool,
 }
 
 /// Arguments for `history prune`.

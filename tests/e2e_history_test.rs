@@ -136,3 +136,88 @@ fn history_prune_json_output() {
     assert_eq!(json["command"], "history prune");
     assert_eq!(json["data"]["dryRun"], true);
 }
+
+// =============================================================================
+// History Show Tests
+// =============================================================================
+
+#[test]
+fn history_show_human_output() {
+    let (mut cmd, _temp) = setup_env();
+
+    // With empty database, should show "no data" message
+    cmd.arg("history")
+        .arg("show")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No usage data found"));
+}
+
+#[test]
+fn history_show_json_output() {
+    let (mut cmd, _temp) = setup_env();
+
+    let output = cmd
+        .arg("history")
+        .arg("show")
+        .arg("--json")
+        .output()
+        .expect("failed to execute");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+
+    assert_eq!(json["command"], "history show");
+    assert_eq!(json["schemaVersion"], "caut.v1");
+    assert!(json["data"]["period"].is_object());
+    assert!(json["data"]["providers"].is_array());
+}
+
+#[test]
+fn history_show_markdown_output() {
+    let (mut cmd, _temp) = setup_env();
+
+    cmd.arg("history")
+        .arg("show")
+        .arg("--format")
+        .arg("md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Usage History"))
+        .stdout(predicate::str::contains("**Period:**"));
+}
+
+#[test]
+fn history_show_with_days_flag() {
+    let (mut cmd, _temp) = setup_env();
+
+    let output = cmd
+        .arg("history")
+        .arg("show")
+        .arg("--days")
+        .arg("30")
+        .arg("--json")
+        .output()
+        .expect("failed to execute");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+
+    assert_eq!(json["data"]["period"]["days"], 30);
+}
+
+#[test]
+fn history_show_ascii_mode() {
+    let (mut cmd, _temp) = setup_env();
+
+    // ASCII mode should work without errors
+    cmd.arg("history")
+        .arg("show")
+        .arg("--ascii")
+        .assert()
+        .success();
+}
