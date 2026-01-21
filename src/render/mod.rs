@@ -1,6 +1,7 @@
 //! Output rendering for human and robot modes.
 
 pub mod doctor;
+pub mod error;
 pub mod human;
 pub mod robot;
 
