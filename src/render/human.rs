@@ -304,6 +304,258 @@ pub fn render_cost(results: &[CostPayload], no_color: bool) -> Result<String> {
     Ok(output)
 }
 
+// =============================================================================
+// History Rendering (ASCII/Unicode)
+// =============================================================================
+
+/// Daily aggregate data for history rendering.
+#[derive(Debug, Clone)]
+pub struct HistoryDay {
+    /// Label to display (e.g., "Mon 01/21").
+    pub label: String,
+    /// Average primary usage percentage for the day.
+    pub avg_primary_pct: f64,
+    /// Optional total cost for the day.
+    pub total_cost: Option<f64>,
+    /// Whether the day hit a usage limit.
+    pub hit_limit: bool,
+}
+
+/// Rendering options for history output.
+#[derive(Debug, Clone)]
+pub struct HistoryRenderOptions {
+    pub no_color: bool,
+    pub max_width: Option<usize>,
+    pub use_unicode: bool,
+}
+
+impl Default for HistoryRenderOptions {
+    fn default() -> Self {
+        Self {
+            no_color: false,
+            max_width: None,
+            use_unicode: supports_unicode(),
+        }
+    }
+}
+
+const SPARKLINE_UNICODE: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+const SPARKLINE_ASCII: [char; 8] = ['.', ':', '-', '=', '+', '*', '#', '@'];
+
+/// Render a history chart for a provider.
+#[must_use]
+pub fn render_history_chart(
+    provider: &str,
+    days: &[HistoryDay],
+    options: &HistoryRenderOptions,
+) -> String {
+    let mut output = String::new();
+    let term_width = options.max_width.unwrap_or_else(terminal_width);
+    let bar_width = term_width.saturating_sub(30).clamp(10, 40);
+
+    let separator = if options.use_unicode { '━' } else { '-' };
+    output.push_str(&format!("{} Usage (Last {} Days)\n", provider, days.len()));
+    output.push_str(&separator.to_string().repeat(term_width.min(60)));
+    output.push('\n');
+
+    for day in days {
+        let bar = render_bar(
+            day.avg_primary_pct,
+            bar_width,
+            options.no_color,
+            options.use_unicode,
+        );
+        let pct = clamp_percent(day.avg_primary_pct);
+        let cost = day
+            .total_cost
+            .map(|c| format!(" ${:.2}", c))
+            .unwrap_or_default();
+        let marker = if day.hit_limit {
+            if options.use_unicode {
+                " ← Hit limit"
+            } else {
+                " <- Hit limit"
+            }
+        } else {
+            ""
+        };
+
+        output.push_str(&format!(
+            "{}: {} {:>5.1}%{}{}\n",
+            day.label, bar, pct, cost, marker
+        ));
+    }
+
+    if !days.is_empty() {
+        let values: Vec<f64> = days.iter().map(|d| d.avg_primary_pct).collect();
+        let sparkline = render_sparkline(&values, options.use_unicode);
+        let (previous_avg, current_avg) = split_averages(&values);
+        let trend = render_trend_indicator(
+            current_avg.unwrap_or(0.0),
+            previous_avg.unwrap_or(0.0),
+            options.no_color,
+            options.use_unicode,
+        );
+
+        output.push('\n');
+        output.push_str(&format!("Trend: {}  {}\n", sparkline, trend));
+    }
+
+    output
+}
+
+fn split_averages(values: &[f64]) -> (Option<f64>, Option<f64>) {
+    if values.len() < 2 {
+        return (None, None);
+    }
+    let midpoint = values.len() / 2;
+    let (first, second) = values.split_at(midpoint);
+    (average(first), average(second))
+}
+
+fn average(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let sum: f64 = values.iter().sum();
+    Some(sum / values.len() as f64)
+}
+
+fn render_bar(percent: f64, width: usize, no_color: bool, use_unicode: bool) -> String {
+    let pct = clamp_percent(percent);
+    let filled = ((pct / 100.0) * width as f64).round() as usize;
+    let empty = width.saturating_sub(filled);
+    let (full_char, empty_char) = if use_unicode {
+        ('█', '░')
+    } else {
+        ('#', '-')
+    };
+
+    let mut bar = repeat_char(full_char, filled);
+    bar.push_str(&repeat_char(empty_char, empty));
+
+    if no_color {
+        return bar;
+    }
+
+    let color = if pct >= 90.0 {
+        Color::parse("red").unwrap()
+    } else if pct >= 70.0 {
+        Color::parse("yellow").unwrap()
+    } else {
+        Color::parse("green").unwrap()
+    };
+
+    colorize_text(&bar, color, no_color)
+}
+
+fn render_sparkline(values: &[f64], use_unicode: bool) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+
+    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let range = (max - min).max(0.0);
+
+    let chars = if use_unicode {
+        &SPARKLINE_UNICODE
+    } else {
+        &SPARKLINE_ASCII
+    };
+
+    values
+        .iter()
+        .map(|&v| {
+            let normalized = if range > 0.0 { (v - min) / range } else { 0.5 };
+            let idx = (normalized * (chars.len() - 1) as f64).round() as usize;
+            chars[idx.min(chars.len() - 1)]
+        })
+        .collect()
+}
+
+fn render_trend_indicator(
+    current_avg: f64,
+    previous_avg: f64,
+    no_color: bool,
+    use_unicode: bool,
+) -> String {
+    let change_pct = if previous_avg > 0.0 {
+        ((current_avg - previous_avg) / previous_avg) * 100.0
+    } else {
+        0.0
+    };
+
+    let (arrow, color) = if change_pct > 10.0 {
+        (
+            if use_unicode { '↗' } else { '^' },
+            Color::parse("red").unwrap(),
+        )
+    } else if change_pct > 2.0 {
+        (
+            if use_unicode { '↗' } else { '^' },
+            Color::parse("yellow").unwrap(),
+        )
+    } else if change_pct < -10.0 {
+        (
+            if use_unicode { '↘' } else { 'v' },
+            Color::parse("green").unwrap(),
+        )
+    } else if change_pct < -2.0 {
+        (
+            if use_unicode { '↘' } else { 'v' },
+            Color::parse("green").unwrap(),
+        )
+    } else {
+        (
+            if use_unicode { '→' } else { '-' },
+            Color::parse("white").unwrap(),
+        )
+    };
+
+    let text = format!("{} {:+.1}%", arrow, change_pct);
+    colorize_text(&text, color, no_color)
+}
+
+fn colorize_text(text: &str, color: Color, no_color: bool) -> String {
+    if no_color {
+        return text.to_string();
+    }
+    let style = Style::new().color(color);
+    style.render(text, ColorSystem::TrueColor)
+}
+
+fn repeat_char(ch: char, count: usize) -> String {
+    std::iter::repeat(ch).take(count).collect()
+}
+
+fn clamp_percent(percent: f64) -> f64 {
+    percent.clamp(0.0, 100.0)
+}
+
+fn terminal_width() -> usize {
+    crossterm::terminal::size()
+        .map(|(w, _)| w as usize)
+        .unwrap_or(80)
+}
+
+fn supports_unicode() -> bool {
+    if !crate::util::env::stdout_is_tty() {
+        return false;
+    }
+
+    if std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false) {
+        return false;
+    }
+
+    let locale = std::env::var("LC_ALL")
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_default()
+        .to_lowercase();
+
+    locale.contains("utf-8")
+}
+
 /// Format a number with thousand separators.
 fn format_number(n: i64) -> String {
     let s = n.to_string();
@@ -685,6 +937,68 @@ mod tests {
         let result = render_cost(&[payload], true).unwrap();
 
         assert_contains!(&result, "No activity");
+    }
+
+    // =========================================================================
+    // History Rendering Tests
+    // =========================================================================
+
+    #[test]
+    fn render_bar_unicode_width() {
+        let bar = render_bar(72.0, 10, true, true);
+        assert_eq!(bar.chars().count(), 10);
+        assert_contains!(&bar, "█");
+        assert_contains!(&bar, "░");
+    }
+
+    #[test]
+    fn render_bar_ascii_fallback() {
+        let bar = render_bar(50.0, 8, true, false);
+        assert_eq!(bar.chars().count(), 8);
+        assert_contains!(&bar, "#");
+        assert_contains!(&bar, "-");
+    }
+
+    #[test]
+    fn render_sparkline_length_matches_values() {
+        let values = vec![10.0, 30.0, 50.0, 70.0, 90.0];
+        let sparkline = render_sparkline(&values, true);
+        assert_eq!(sparkline.chars().count(), values.len());
+    }
+
+    #[test]
+    fn render_trend_indicator_increasing() {
+        let trend = render_trend_indicator(70.0, 50.0, true, false);
+        assert_contains!(&trend, "^");
+        assert_contains!(&trend, "+");
+    }
+
+    #[test]
+    fn render_history_chart_contains_trend() {
+        let days = vec![
+            HistoryDay {
+                label: "Mon".to_string(),
+                avg_primary_pct: 55.0,
+                total_cost: Some(2.5),
+                hit_limit: false,
+            },
+            HistoryDay {
+                label: "Tue".to_string(),
+                avg_primary_pct: 78.0,
+                total_cost: None,
+                hit_limit: true,
+            },
+        ];
+
+        let options = HistoryRenderOptions {
+            no_color: true,
+            max_width: Some(60),
+            use_unicode: false,
+        };
+
+        let output = render_history_chart("Claude", &days, &options);
+        assert_contains!(&output, "Claude Usage");
+        assert_contains!(&output, "Trend:");
     }
 
     // =========================================================================
