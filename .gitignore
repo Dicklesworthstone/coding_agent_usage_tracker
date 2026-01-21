@@ -34,3 +34,10 @@ tarpaulin-report.html
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# NTM agent coordination
+.ntm/
+
+# Test artifacts
+test-logs/
+test-results.log
