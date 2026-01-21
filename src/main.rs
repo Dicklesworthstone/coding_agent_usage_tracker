@@ -60,9 +60,9 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!("{}", e);
-            if !matches!(e, CautError::Other(_)) {
-                eprintln!("Error: {}", e);
-            }
+            // Use rich error rendering (respects format, no_color, and TTY detection)
+            let error_output = caut::render::error::render_error(&e, format, cli.no_color);
+            eprintln!("{}", error_output);
             ExitCode::from(e.exit_code() as u8)
         }
     }
