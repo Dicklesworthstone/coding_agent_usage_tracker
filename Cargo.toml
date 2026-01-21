@@ -47,6 +47,9 @@ colored = "3.1.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 which = "8.0.0"
+
+# Regex for markup stripping
+regex = "1.11"
 futures = "0.3.31"
 rusqlite = "0.38.0"
 

@@ -291,6 +291,7 @@ dependencies = [
  "jsonschema",
  "keyring",
  "predicates",
+ "regex",
  "reqwest 0.13.1",
  "rich_rust",
  "rusqlite",

@@ -9,14 +9,100 @@
 //! These tests run against the compiled binary and verify real CLI behavior.
 
 use assert_cmd::Command;
+use caut::cli::args::{Cli, OutputFormat, UsageArgs};
+use caut::core::provider::Provider;
+use caut::storage::config::{
+    Config, ConfigSource, ENV_CONFIG, ENV_FORMAT, ENV_NO_COLOR, ENV_PRETTY, ENV_PROVIDERS,
+    ENV_TIMEOUT, ENV_VERBOSE, ResolvedConfig,
+};
 use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tempfile::TempDir;
 
 mod common;
 
 use common::logger::TestLogger;
+
+// =============================================================================
+// Environment Helpers (Config Integration Tests)
+// =============================================================================
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+struct EnvGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    prior: Vec<(String, Option<String>)>,
+}
+
+impl EnvGuard {
+    #[allow(unsafe_code)]
+    fn set(vars: &[(&str, Option<&str>)]) -> Self {
+        let lock = ENV_LOCK.lock().expect("env lock");
+        let mut prior = Vec::new();
+
+        for (key, value) in vars {
+            let key_string = (*key).to_string();
+            let existing = std::env::var(key).ok();
+            prior.push((key_string.clone(), existing));
+
+            unsafe {
+                match value {
+                    Some(val) => std::env::set_var(key, val),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+
+        Self { _lock: lock, prior }
+    }
+}
+
+impl Drop for EnvGuard {
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        for (key, value) in self.prior.drain(..) {
+            unsafe {
+                match value {
+                    Some(val) => std::env::set_var(&key, val),
+                    None => std::env::remove_var(&key),
+                }
+            }
+        }
+    }
+}
+
+fn make_test_cli() -> Cli {
+    Cli {
+        command: None,
+        format: OutputFormat::Human,
+        json: false,
+        pretty: false,
+        no_color: false,
+        log_level: None,
+        json_output: false,
+        verbose: false,
+        debug_rich: false,
+    }
+}
+
+fn make_test_usage_args() -> UsageArgs {
+    UsageArgs {
+        provider: None,
+        account: None,
+        account_index: None,
+        all_accounts: false,
+        no_credits: false,
+        status: false,
+        source: None,
+        web: false,
+        web_timeout: None,
+        web_debug_dump_html: false,
+        watch: false,
+        interval: 30,
+    }
+}
 
 // =============================================================================
 // Test Helpers
@@ -638,4 +724,209 @@ fn usage_creates_history_db() {
     assert_eq!(count, 1, "usage_snapshots table should exist");
 
     log.finish_ok();
+}
+
+// =============================================================================
+// Config Integration Tests
+// =============================================================================
+
+#[test]
+fn doctor_config_detects_xdg_config_home() {
+    let log = TestLogger::new("doctor_config_detects_xdg_config_home");
+    log.phase("setup");
+
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let config_dir = temp_dir.path().join("caut");
+    fs::create_dir_all(&config_dir).expect("create config dir");
+    let config_path = config_dir.join("config.toml");
+    fs::write(&config_path, "[general]\ntimeout_seconds = 45\n").expect("write config");
+
+    log.phase("execute");
+    let output = caut_cmd()
+        .arg("doctor")
+        .arg("--json")
+        .env("XDG_CONFIG_HOME", temp_dir.path())
+        .output()
+        .expect("Failed to execute");
+
+    log.phase("verify");
+    save_artifact("e2e_doctor_config_xdg_stdout.json", &output.stdout);
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout_str).expect("doctor json output");
+    let config_status = &json["configStatus"];
+    let status = config_status["status"]["status"].as_str().unwrap_or("");
+    assert_eq!(status, "pass");
+
+    let details = config_status["status"]["details"].as_str().unwrap_or("");
+    assert!(
+        details.contains("config.toml"),
+        "config details should include config path"
+    );
+
+    log.finish_ok();
+}
+
+#[test]
+fn doctor_config_invalid_toml_reports_failure() {
+    let log = TestLogger::new("doctor_config_invalid_toml_reports_failure");
+    log.phase("setup");
+
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let config_dir = temp_dir.path().join("caut");
+    fs::create_dir_all(&config_dir).expect("create config dir");
+    let config_path = config_dir.join("config.toml");
+    fs::write(&config_path, "this is not valid toml {{{{").expect("write config");
+
+    log.phase("execute");
+    let output = caut_cmd()
+        .arg("doctor")
+        .arg("--json")
+        .env("XDG_CONFIG_HOME", temp_dir.path())
+        .output()
+        .expect("Failed to execute");
+
+    log.phase("verify");
+    save_artifact("e2e_doctor_config_invalid_stdout.json", &output.stdout);
+    save_artifact("e2e_doctor_config_invalid_stderr.txt", &output.stderr);
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout_str).expect("doctor json output");
+    let config_status = &json["configStatus"];
+    let status = config_status["status"]["status"].as_str().unwrap_or("");
+    assert_eq!(status, "fail");
+
+    let reason = config_status["status"]["reason"].as_str().unwrap_or("");
+    assert!(
+        reason.to_lowercase().contains("invalid config file")
+            || reason.to_lowercase().contains("failed to load"),
+        "config failure should mention invalid config"
+    );
+
+    log.finish_ok();
+}
+
+#[test]
+fn resolved_config_env_overrides_config_file() {
+    let dir = TempDir::new().expect("temp dir");
+    let config_path = dir.path().join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[general]
+timeout_seconds = 60
+
+[output]
+format = "md"
+color = true
+pretty = false
+
+[providers]
+default_providers = ["codex"]
+"#,
+    )
+    .expect("write config");
+
+    let _env = EnvGuard::set(&[
+        (ENV_CONFIG, Some(config_path.to_str().expect("config path"))),
+        (ENV_PROVIDERS, Some("claude")),
+        (ENV_FORMAT, Some("json")),
+        (ENV_TIMEOUT, Some("42")),
+        (ENV_NO_COLOR, None),
+        (ENV_VERBOSE, None),
+        (ENV_PRETTY, None),
+    ]);
+
+    let cli = make_test_cli();
+    let usage_args = make_test_usage_args();
+    let resolved = ResolvedConfig::resolve(&cli, Some(&usage_args)).expect("resolve config");
+
+    assert_eq!(resolved.format, OutputFormat::Json);
+    assert_eq!(resolved.timeout.as_secs(), 42);
+    assert_eq!(resolved.providers, vec![Provider::Claude]);
+    assert_eq!(resolved.sources.format, ConfigSource::Env);
+    assert_eq!(resolved.sources.timeout, ConfigSource::Env);
+    assert_eq!(resolved.sources.providers, ConfigSource::Env);
+}
+
+#[test]
+fn resolved_config_cli_overrides_config_file() {
+    let dir = TempDir::new().expect("temp dir");
+    let config_path = dir.path().join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[general]
+timeout_seconds = 120
+
+[output]
+format = "md"
+color = true
+pretty = false
+
+[providers]
+default_providers = ["claude"]
+"#,
+    )
+    .expect("write config");
+
+    let _env = EnvGuard::set(&[
+        (ENV_CONFIG, Some(config_path.to_str().expect("config path"))),
+        (ENV_PROVIDERS, None),
+        (ENV_FORMAT, None),
+        (ENV_TIMEOUT, None),
+        (ENV_NO_COLOR, None),
+        (ENV_VERBOSE, None),
+        (ENV_PRETTY, None),
+    ]);
+
+    let mut cli = make_test_cli();
+    cli.json = true;
+    let mut usage_args = make_test_usage_args();
+    usage_args.provider = Some("codex".to_string());
+    usage_args.web_timeout = Some(5);
+
+    let resolved = ResolvedConfig::resolve(&cli, Some(&usage_args)).expect("resolve config");
+
+    assert_eq!(resolved.format, OutputFormat::Json);
+    assert_eq!(resolved.timeout.as_secs(), 5);
+    assert_eq!(resolved.providers, vec![Provider::Codex]);
+    assert_eq!(resolved.sources.format, ConfigSource::Cli);
+    assert_eq!(resolved.sources.timeout, ConfigSource::Cli);
+    assert_eq!(resolved.sources.providers, ConfigSource::Cli);
+}
+
+#[test]
+fn config_load_parses_provider_settings() {
+    let dir = TempDir::new().expect("temp dir");
+    let config_path = dir.path().join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[providers]
+default_providers = ["claude", "codex"]
+
+[providers.claude]
+enabled = false
+api_base = "https://claude.example.test"
+
+[providers.codex]
+enabled = true
+api_base = "https://codex.example.test"
+"#,
+    )
+    .expect("write config");
+
+    let config = Config::load_from(&config_path).expect("load config");
+    assert_eq!(config.providers.default_providers, vec!["claude", "codex"]);
+    assert!(!config.providers.claude.enabled);
+    assert_eq!(
+        config.providers.claude.api_base.as_deref(),
+        Some("https://claude.example.test")
+    );
+    assert!(config.providers.codex.enabled);
+    assert_eq!(
+        config.providers.codex.api_base.as_deref(),
+        Some("https://codex.example.test")
+    );
 }
