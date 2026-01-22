@@ -97,6 +97,8 @@ async fn run(cli: Cli) -> caut::Result<()> {
         }
 
         Some(Commands::History(cmd)) => caut::cli::history::execute(&cmd, format, pretty, no_color),
+
+        Some(Commands::Prompt(args)) => caut::cli::prompt::execute(&args),
     }
 }
 
@@ -238,8 +240,10 @@ USAGE:
 COMMANDS:
     usage           Show usage for providers (default)
     cost            Show local cost usage
+    history         Manage usage history and retention
     token-accounts  Manage token accounts
     doctor          Diagnose caut setup and provider health
+    prompt          Output usage for shell prompt integration
 
 QUICK START:
     caut usage                    # Show usage for primary providers
@@ -247,6 +251,10 @@ QUICK START:
     caut usage --status           # Include provider status
     caut cost --provider claude   # Show Claude cost usage
     caut doctor                   # Check setup and provider health
+
+SHELL PROMPT INTEGRATION:
+    caut prompt                   # Output for shell prompt (fast, cached)
+    caut prompt --install bash    # Generate bash integration snippet
 
 ROBOT MODE (for AI agents):
     caut usage --json             # JSON output

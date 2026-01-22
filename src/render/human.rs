@@ -105,6 +105,11 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
         ));
     }
 
+    // Auth warning
+    if let Some(warning) = &payload.auth_warning {
+        content_lines.push(format_auth_warning_segments(warning, no_color));
+    }
+
     // Fallback if no data
     if content_lines.is_empty() {
         let style = if no_color {
@@ -229,6 +234,23 @@ fn format_status_segments(
     if let Some(desc) = description {
         segments.push(Segment::plain(format!(" – {}", desc)));
     }
+
+    segments
+}
+
+/// Format auth warning as styled segments.
+fn format_auth_warning_segments(warning: &str, no_color: bool) -> Vec<Segment<'static>> {
+    let mut segments = Vec::new();
+
+    // Warning icon and prefix
+    let warning_style = if no_color {
+        Style::new()
+    } else {
+        Style::new().color(Color::parse("yellow").unwrap()).bold()
+    };
+
+    segments.push(Segment::styled("⚠ ".to_string(), warning_style.clone()));
+    segments.push(Segment::styled(warning.to_string(), warning_style));
 
     segments
 }

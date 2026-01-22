@@ -1,7 +1,9 @@
 //! Usage command implementation.
 
 use crate::cli::args::{OutputFormat, UsageArgs};
+use crate::cli::prompt::{ProviderPromptData, update_cache as update_prompt_cache};
 use crate::cli::watch;
+use crate::core::credential_health::AuthHealthAggregator;
 use crate::core::models::{ProviderPayload, RobotOutput};
 use crate::core::pipeline::fetch_providers_with_timeout;
 use crate::core::provider::ProviderSelection;
@@ -87,6 +89,7 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
     let mut errors = Vec::new();
 
     let paths = AppPaths::new();
+    let auth_checker = AuthHealthAggregator::new();
 
     for outcome in outcomes {
         match outcome.result {
@@ -109,6 +112,10 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
                     None
                 };
 
+                // Check auth health for this provider
+                let auth_health = auth_checker.check_provider(outcome.provider);
+                let auth_warning = auth_health.warning_message();
+
                 let payload = ProviderPayload {
                     provider: outcome.provider.cli_name().to_string(),
                     account: snapshot
@@ -122,12 +129,31 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
                     credits: None, // TODO: Fetch credits
                     antigravity_plan_info: None,
                     openai_dashboard: None,
+                    auth_warning,
                 };
                 payloads.push(payload);
             }
             Err(e) => {
                 errors.push(format!("{}: {}", outcome.provider.cli_name(), e));
             }
+        }
+    }
+
+    // Update prompt cache with successful results
+    if !payloads.is_empty() {
+        let prompt_data: Vec<ProviderPromptData> = payloads
+            .iter()
+            .map(|p| ProviderPromptData {
+                provider: p.provider.clone(),
+                primary_pct: p.usage.primary.as_ref().map(|w| w.used_percent),
+                secondary_pct: p.usage.secondary.as_ref().map(|w| w.used_percent),
+                credits_remaining: p.credits.as_ref().map(|c| c.remaining),
+                cost_today_usd: None, // TODO: Extract cost from payload if available
+            })
+            .collect();
+
+        if let Err(e) = update_prompt_cache(&prompt_data) {
+            tracing::warn!("Failed to update prompt cache: {}", e);
         }
     }
 

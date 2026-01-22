@@ -287,6 +287,10 @@ pub struct ProviderPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "openaiDashboard")]
     pub openai_dashboard: Option<OpenAIDashboardSnapshot>,
+
+    /// Authentication health warning message (if credentials need attention).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_warning: Option<String>,
 }
 
 // =============================================================================
@@ -375,6 +379,49 @@ pub struct CostPayload {
 // Robot Output Envelope
 // =============================================================================
 
+/// Serializable fix suggestion for robot output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FixSuggestionReport {
+    pub commands: Vec<String>,
+    pub context: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prevention: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_url: Option<String>,
+
+    pub auto_fixable: bool,
+}
+
+/// Report for a single strategy attempt during fetch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyAttemptReport {
+    pub strategy_id: String,
+    pub kind: String,
+    pub duration_ms: u64,
+    pub success: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Structured error report for a provider failure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderErrorReport {
+    pub provider: String,
+    pub final_error: String,
+    pub error_code: String,
+    pub retryable: bool,
+    pub attempts: Vec<StrategyAttemptReport>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suggestions: Vec<FixSuggestionReport>,
+}
+
 /// Top-level JSON envelope for robot mode output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -386,6 +433,9 @@ pub struct RobotOutput<T> {
 
     #[serde(default)]
     pub errors: Vec<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_details: Option<Vec<ProviderErrorReport>>,
 
     pub meta: RobotMeta,
 }
@@ -408,6 +458,7 @@ impl<T> RobotOutput<T> {
             command: command.into(),
             data,
             errors: Vec::new(),
+            error_details: None,
             meta: RobotMeta {
                 format: "json".to_string(),
                 flags: Vec::new(),
@@ -424,6 +475,29 @@ impl<T> RobotOutput<T> {
             command: command.into(),
             data,
             errors,
+            error_details: None,
+            meta: RobotMeta {
+                format: "json".to_string(),
+                flags: Vec::new(),
+                runtime: "cli".to_string(),
+            },
+        }
+    }
+
+    /// Create with errors and structured error details.
+    pub fn with_errors_and_details(
+        command: impl Into<String>,
+        data: T,
+        errors: Vec<String>,
+        error_details: Option<Vec<ProviderErrorReport>>,
+    ) -> Self {
+        Self {
+            schema_version: "caut.v1".to_string(),
+            generated_at: Utc::now(),
+            command: command.into(),
+            data,
+            errors,
+            error_details,
             meta: RobotMeta {
                 format: "json".to_string(),
                 flags: Vec::new(),
@@ -437,6 +511,21 @@ impl RobotOutput<Vec<ProviderPayload>> {
     /// Create a usage output envelope.
     pub fn usage(providers: Vec<ProviderPayload>, errors: Vec<String>) -> Self {
         Self::with_errors("usage", providers, errors)
+    }
+
+    /// Create a usage output envelope with structured error details.
+    pub fn usage_with_details(
+        providers: Vec<ProviderPayload>,
+        errors: Vec<String>,
+        error_details: Vec<ProviderErrorReport>,
+    ) -> Self {
+        let details = if error_details.is_empty() {
+            None
+        } else {
+            Some(error_details)
+        };
+
+        Self::with_errors_and_details("usage", providers, errors, details)
     }
 }
 

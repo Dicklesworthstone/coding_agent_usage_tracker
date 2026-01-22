@@ -205,6 +205,7 @@ pub fn provider_payload(provider: &str, source: &str, usage: UsageSnapshot) -> P
         },
         antigravity_plan_info: None,
         openai_dashboard: None,
+        auth_warning: None,
     }
 }
 

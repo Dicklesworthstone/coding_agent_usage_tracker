@@ -229,6 +229,7 @@ pub fn make_test_provider_payload(provider: &str, source: &str) -> ProviderPaylo
         },
         antigravity_plan_info: None,
         openai_dashboard: None,
+        auth_warning: None,
     }
 }
 
@@ -247,6 +248,7 @@ pub fn make_test_provider_payload_minimal(provider: &str, source: &str) -> Provi
         credits: None,
         antigravity_plan_info: None,
         openai_dashboard: None,
+        auth_warning: None,
     }
 }
 

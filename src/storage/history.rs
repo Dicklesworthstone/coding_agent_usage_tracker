@@ -296,26 +296,9 @@ impl HistoryStore {
         let from = to - window;
         let snapshots = self.get_snapshots(provider, from, to)?;
 
-        if snapshots.len() < 2 {
-            return Ok(None);
-        }
-
-        let newest = &snapshots[0];
-        let oldest = &snapshots[snapshots.len() - 1];
-
-        let (new_pct, old_pct) = match (newest.primary_used_pct, oldest.primary_used_pct) {
-            (Some(new_pct), Some(old_pct)) => (new_pct, old_pct),
-            _ => return Ok(None),
-        };
-
-        let elapsed = newest.fetched_at - oldest.fetched_at;
-        let hours = elapsed.num_minutes() as f64 / 60.0;
-
-        if hours <= 0.0 {
-            return Ok(None);
-        }
-
-        Ok(Some((new_pct - old_pct) / hours))
+        Ok(crate::core::prediction::calculate_velocity(
+            &snapshots, window,
+        ))
     }
 
     /// Get aggregated stats for a time period.

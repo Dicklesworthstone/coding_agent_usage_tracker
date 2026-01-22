@@ -9,10 +9,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::args::{PromptArgs, PromptFormat, ShellType};
-use crate::core::provider::Provider;
 use crate::error::Result;
-use crate::storage::cache::{is_fresh, read_if_fresh, write};
 use crate::storage::AppPaths;
+use crate::storage::cache::{is_fresh, read_if_fresh, write};
 
 /// Cached prompt data for a provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,7 +91,11 @@ pub fn execute(args: &PromptArgs) -> Result<()> {
 }
 
 /// Format prompt output according to the requested format.
-fn format_prompt(providers: &[&ProviderPromptData], format: PromptFormat, use_color: bool) -> String {
+fn format_prompt(
+    providers: &[&ProviderPromptData],
+    format: PromptFormat,
+    use_color: bool,
+) -> String {
     match format {
         PromptFormat::Minimal => format_minimal(providers, use_color),
         PromptFormat::Compact => format_compact(providers, use_color),
