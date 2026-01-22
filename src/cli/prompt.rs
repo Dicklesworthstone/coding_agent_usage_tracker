@@ -2,6 +2,14 @@
 //!
 //! Provides fast, cached usage output for shell prompt integration.
 //! Designed for <50ms execution time by reading from cache only.
+//!
+//! # Staleness Handling
+//!
+//! The prompt command handles stale cache data gracefully:
+//! - **Fresh** (< 5 min): Display normally
+//! - **Stale** (5-30 min): Display with "~" prefix
+//! - **Very stale** (30+ min): Display with "?" prefix
+//! - **Missing**: Display nothing (graceful degradation)
 
 use std::time::Duration;
 
@@ -11,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::cli::args::{PromptArgs, PromptFormat, ShellType};
 use crate::error::Result;
 use crate::storage::AppPaths;
-use crate::storage::cache::{is_fresh, read_if_fresh, write};
+use crate::storage::cache::{is_fresh, read_if_fresh, read_with_staleness, write, write_async, Staleness};
 
 /// Cached prompt data for a provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,14 +56,27 @@ pub fn execute(args: &PromptArgs) -> Result<()> {
     // Read from cache only - never do network fetch
     let paths = AppPaths::new();
     let cache_path = paths.prompt_cache_file();
-    let max_age = Duration::from_secs(args.cache_max_age);
 
-    // Read cache, return empty string if no cache or stale
-    let cache: Option<PromptCache> = read_if_fresh(&cache_path, max_age).unwrap_or(None);
+    // Read cache with staleness tracking
+    // We use read_with_staleness for graceful degradation - showing stale data
+    // with a prefix is better than showing nothing
+    let cache_result: Option<(PromptCache, Staleness)> =
+        read_with_staleness(&cache_path).unwrap_or(None);
 
-    let Some(cache) = cache else {
-        // No cache or expired - output empty string (graceful degradation)
-        return Ok(());
+    // For strict mode (legacy behavior), check max_age
+    let (cache, staleness) = if args.strict_freshness {
+        // Legacy behavior: use max_age for strict freshness check
+        let max_age = Duration::from_secs(args.cache_max_age);
+        match read_if_fresh(&cache_path, max_age).unwrap_or(None) {
+            Some(cache) => (cache, Staleness::Fresh),
+            None => return Ok(()), // Strict mode: no output if stale
+        }
+    } else {
+        // Graceful degradation: show stale data with indicator
+        match cache_result {
+            Some((cache, staleness)) => (cache, staleness),
+            None => return Ok(()), // No cache at all
+        }
     };
 
     // Filter providers if specified
@@ -83,8 +104,8 @@ pub fn execute(args: &PromptArgs) -> Result<()> {
         atty::is(atty::Stream::Stdout) && std::env::var("NO_COLOR").is_err()
     };
 
-    // Format output
-    let output = format_prompt(&providers, args.prompt_format, use_color);
+    // Format output with staleness prefix
+    let output = format_prompt_with_staleness(&providers, args.prompt_format, use_color, staleness);
     print!("{output}");
 
     Ok(())
@@ -96,11 +117,28 @@ fn format_prompt(
     format: PromptFormat,
     use_color: bool,
 ) -> String {
-    match format {
+    format_prompt_with_staleness(providers, format, use_color, Staleness::Fresh)
+}
+
+/// Format prompt output with staleness indicator.
+fn format_prompt_with_staleness(
+    providers: &[&ProviderPromptData],
+    format: PromptFormat,
+    use_color: bool,
+    staleness: Staleness,
+) -> String {
+    let base_output = match format {
         PromptFormat::Minimal => format_minimal(providers, use_color),
         PromptFormat::Compact => format_compact(providers, use_color),
         PromptFormat::Full => format_full(providers, use_color),
         PromptFormat::Icon => format_icon(providers, use_color),
+    };
+
+    // Add staleness prefix if not fresh
+    if staleness == Staleness::Fresh || base_output.is_empty() {
+        base_output
+    } else {
+        format!("{}{}", staleness.prefix(), base_output)
     }
 }
 
@@ -401,6 +439,21 @@ pub fn update_cache(providers: &[ProviderPromptData]) -> Result<()> {
     write(&cache_path, &cache)
 }
 
+/// Update the prompt cache asynchronously (non-blocking).
+/// Called by the usage command after successful fetches.
+/// Returns immediately without waiting for write to complete.
+pub fn update_cache_async(providers: Vec<ProviderPromptData>) {
+    let paths = AppPaths::new();
+    let cache_path = paths.prompt_cache_file();
+
+    let cache = PromptCache {
+        cached_at: Utc::now(),
+        providers,
+    };
+
+    write_async(cache_path, cache);
+}
+
 /// Check if the prompt cache exists and is fresh.
 pub fn cache_is_fresh(max_age_secs: u64) -> bool {
     let paths = AppPaths::new();
@@ -492,5 +545,39 @@ mod tests {
     fn colorize_red_for_high_usage() {
         let output = colorize_by_percent("95%", 95.0);
         assert!(output.contains("\x1b[31m")); // Red
+    }
+
+    // Staleness tests
+
+    #[test]
+    fn format_prompt_with_staleness_fresh_no_prefix() {
+        let data = make_test_data();
+        let output = format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::Fresh);
+        assert_eq!(output, "46%");
+        assert!(!output.starts_with('~'));
+        assert!(!output.starts_with('?'));
+    }
+
+    #[test]
+    fn format_prompt_with_staleness_stale_prefix() {
+        let data = make_test_data();
+        let output = format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::Stale);
+        assert!(output.starts_with('~'), "Expected ~ prefix for stale data: {}", output);
+        assert!(output.contains("46%"));
+    }
+
+    #[test]
+    fn format_prompt_with_staleness_very_stale_prefix() {
+        let data = make_test_data();
+        let output = format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::VeryStale);
+        assert!(output.starts_with('?'), "Expected ? prefix for very stale data: {}", output);
+        assert!(output.contains("46%"));
+    }
+
+    #[test]
+    fn format_prompt_with_empty_providers_no_prefix() {
+        let providers: Vec<&ProviderPromptData> = vec![];
+        let output = format_prompt_with_staleness(&providers, PromptFormat::Minimal, false, Staleness::Stale);
+        assert_eq!(output, ""); // Empty output should not have prefix
     }
 }

@@ -284,8 +284,14 @@ pub struct PromptArgs {
     pub no_color: bool,
 
     /// Maximum cache age in seconds before showing empty (default: 60)
+    /// Only used when --strict-freshness is enabled.
     #[arg(long, value_name = "SECONDS", default_value = "60")]
     pub cache_max_age: u64,
+
+    /// Strict freshness mode: show nothing if cache exceeds max_age.
+    /// Without this flag, stale data is shown with a staleness indicator (~/?).
+    #[arg(long)]
+    pub strict_freshness: bool,
 
     /// Generate shell integration snippet and exit
     #[arg(long, value_enum)]
