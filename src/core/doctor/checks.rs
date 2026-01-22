@@ -5,9 +5,7 @@
 
 use super::{CheckStatus, DiagnosticCheck, ProviderHealth};
 use crate::core::cli_runner::run_command;
-use crate::core::credential_health::{
-    AuthHealthAggregator, HealthSeverity, OverallHealth,
-};
+use crate::core::credential_health::{AuthHealthAggregator, OverallHealth};
 use crate::core::provider::Provider;
 use crate::error::CautError;
 use std::time::{Duration, Instant};

@@ -157,8 +157,6 @@ fn render_provider_health(health: &ProviderHealth, no_color: bool) -> String {
 fn render_check_line(check: &DiagnosticCheck, indent: &str, no_color: bool) -> String {
     let mut output = String::new();
 
-    let is_ok = check.status.is_ready();
-    let is_warning = check.status.is_warning();
     let icon = status_icon_detailed(&check.status, no_color);
 
     // Main line
