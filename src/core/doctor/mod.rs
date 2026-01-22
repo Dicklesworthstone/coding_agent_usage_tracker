@@ -15,6 +15,11 @@ use std::time::Duration;
 pub enum CheckStatus {
     /// Check passed with optional details.
     Pass { details: Option<String> },
+    /// Check passed but with a warning (e.g., credentials expiring soon).
+    Warning {
+        details: String,
+        suggestion: Option<String>,
+    },
     /// Check failed with reason and optional fix suggestion.
     Fail {
         reason: String,
@@ -27,16 +32,22 @@ pub enum CheckStatus {
 }
 
 impl CheckStatus {
-    /// Whether this status indicates the check is ready.
+    /// Whether this status indicates the check is ready (functional).
     #[must_use]
     pub const fn is_ready(&self) -> bool {
-        matches!(self, Self::Pass { .. } | Self::Skipped { .. })
+        matches!(self, Self::Pass { .. } | Self::Warning { .. } | Self::Skipped { .. })
     }
 
-    /// Whether this status requires attention.
+    /// Whether this status requires attention (warning or worse).
     #[must_use]
     pub const fn needs_attention(&self) -> bool {
-        !self.is_ready()
+        matches!(self, Self::Warning { .. } | Self::Fail { .. } | Self::Timeout { .. })
+    }
+
+    /// Whether this status is a warning (working but needs attention soon).
+    #[must_use]
+    pub const fn is_warning(&self) -> bool {
+        matches!(self, Self::Warning { .. })
     }
 }
 
@@ -48,6 +59,13 @@ impl fmt::Display for CheckStatus {
                     write!(f, "pass ({details})")
                 } else {
                     write!(f, "pass")
+                }
+            }
+            Self::Warning { details, suggestion } => {
+                if let Some(suggestion) = suggestion {
+                    write!(f, "warning: {details} (suggestion: {suggestion})")
+                } else {
+                    write!(f, "warning: {details}")
                 }
             }
             Self::Fail { reason, suggestion } => {
@@ -99,6 +117,8 @@ pub struct ProviderHealth {
     pub cli_installed: DiagnosticCheck,
     pub cli_version: Option<String>,
     pub authenticated: DiagnosticCheck,
+    /// Credential health check (token expiration, etc.).
+    pub credential_health: Option<DiagnosticCheck>,
     pub api_reachable: DiagnosticCheck,
 }
 
@@ -108,7 +128,17 @@ impl ProviderHealth {
     pub fn is_ready(&self) -> bool {
         self.cli_installed.status.is_ready()
             && self.authenticated.status.is_ready()
+            && self.credential_health.as_ref().map_or(true, |c| c.status.is_ready())
             && self.api_reachable.status.is_ready()
+    }
+
+    /// Whether any checks need attention (warning or worse).
+    #[must_use]
+    pub fn has_warnings(&self) -> bool {
+        self.cli_installed.status.needs_attention()
+            || self.authenticated.status.needs_attention()
+            || self.credential_health.as_ref().map_or(false, |c| c.status.needs_attention())
+            || self.api_reachable.status.needs_attention()
     }
 }
 
@@ -190,6 +220,7 @@ mod tests {
             cli_installed: ok.clone(),
             cli_version: None,
             authenticated: ok.clone(),
+            credential_health: None,
             api_reachable: ok.clone(),
         };
 
@@ -198,6 +229,7 @@ mod tests {
             cli_installed: ok.clone(),
             cli_version: None,
             authenticated: bad,
+            credential_health: None,
             api_reachable: ok.clone(),
         };
 
@@ -220,6 +252,7 @@ mod tests {
             cli_installed: ok.clone(),
             cli_version: Some("1.0.0".to_string()),
             authenticated: ok.clone(),
+            credential_health: None,
             api_reachable: ok.clone(),
         };
 

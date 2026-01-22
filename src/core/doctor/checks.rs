@@ -5,6 +5,9 @@
 
 use super::{CheckStatus, DiagnosticCheck, ProviderHealth};
 use crate::core::cli_runner::run_command;
+use crate::core::credential_health::{
+    AuthHealthAggregator, HealthSeverity, OverallHealth,
+};
 use crate::core::provider::Provider;
 use crate::error::CautError;
 use std::time::{Duration, Instant};
@@ -345,6 +348,67 @@ async fn check_generic_auth(provider: Provider) -> CheckStatus {
     }
 }
 
+/// Check credential health (token expiration, etc.) for a provider.
+pub fn check_credential_health(provider: Provider) -> Option<DiagnosticCheck> {
+    let start = Instant::now();
+    let aggregator = AuthHealthAggregator::new();
+    let health = aggregator.check_provider(provider);
+
+    // Only return a check if we actually found credentials to evaluate
+    if health.sources.is_empty() {
+        return None;
+    }
+
+    let status = match health.overall {
+        OverallHealth::Healthy => CheckStatus::Pass {
+            details: Some(health.sources.iter()
+                .filter_map(|s| {
+                    match &s.health {
+                        crate::core::credential_health::CredentialHealth::OAuth(oauth) => {
+                            Some(format!("{}: {}", s.source_type, oauth.description()))
+                        }
+                        crate::core::credential_health::CredentialHealth::Jwt(jwt) => {
+                            Some(format!("{}: {}", s.source_type, jwt.description()))
+                        }
+                        crate::core::credential_health::CredentialHealth::ApiKeyPresent => {
+                            Some(format!("{}: API key present", s.source_type))
+                        }
+                        _ => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")),
+        },
+        OverallHealth::ExpiringSoon => {
+            let warning_msg = health.warning_message().unwrap_or_else(|| "Token expiring soon".to_string());
+            CheckStatus::Warning {
+                details: warning_msg,
+                suggestion: health.recommended_action,
+            }
+        }
+        OverallHealth::Expired => {
+            let error_msg = health.warning_message().unwrap_or_else(|| "Token expired".to_string());
+            CheckStatus::Fail {
+                reason: error_msg,
+                suggestion: health.recommended_action,
+            }
+        }
+        OverallHealth::Missing => {
+            // Missing is already handled by check_authenticated, skip here
+            return None;
+        }
+        OverallHealth::Unknown => CheckStatus::Skipped {
+            reason: "Unable to determine credential health".to_string(),
+        },
+    };
+
+    Some(DiagnosticCheck {
+        name: format!("{} credential health", provider.display_name()),
+        status,
+        duration: Some(start.elapsed()),
+    })
+}
+
 /// Check if provider API/service is reachable.
 pub async fn check_api_reachable(provider: Provider) -> DiagnosticCheck {
     let start = Instant::now();
@@ -401,11 +465,15 @@ pub async fn check_provider_health(provider: Provider) -> ProviderHealth {
 
     let (cli_check, cli_version) = cli_result;
 
+    // Check credential health (sync, runs fast)
+    let credential_health = check_credential_health(provider);
+
     ProviderHealth {
         provider,
         cli_installed: cli_check,
         cli_version,
         authenticated: auth_result,
+        credential_health,
         api_reachable: api_result,
     }
 }

@@ -136,6 +136,12 @@ fn render_provider_health(health: &ProviderHealth, no_color: bool) -> String {
     output.push_str(&render_check_line(&health.authenticated, "  ", no_color));
     output.push('\n');
 
+    // Credential health check (if present)
+    if let Some(ref cred_health) = health.credential_health {
+        output.push_str(&render_check_line(cred_health, "  ", no_color));
+        output.push('\n');
+    }
+
     // API reachable check
     output.push_str(&render_check_line(&health.api_reachable, "  ", no_color));
     if let Some(duration) = health.api_reachable.duration {
@@ -152,17 +158,30 @@ fn render_check_line(check: &DiagnosticCheck, indent: &str, no_color: bool) -> S
     let mut output = String::new();
 
     let is_ok = check.status.is_ready();
-    let icon = status_icon(is_ok, no_color);
+    let is_warning = check.status.is_warning();
+    let icon = status_icon_detailed(&check.status, no_color);
 
     // Main line
     let main_line = format!("{}{} {}", indent, icon, check.name);
-    output.push_str(&colorize_line(&main_line, is_ok, no_color));
+    output.push_str(&colorize_line_status(&main_line, &check.status, no_color));
 
     // Details or suggestion
     match &check.status {
         CheckStatus::Pass { details } => {
             if let Some(details) = details {
                 output.push_str(&format!("  {}", details));
+            }
+        }
+        CheckStatus::Warning { details, suggestion } => {
+            output.push('\n');
+            output.push_str(&colorize_line_status(
+                &format!("{}    {}", indent, details),
+                &check.status,
+                no_color
+            ));
+            if let Some(suggestion) = suggestion {
+                let arrow = if no_color { "->" } else { "\u{2192}" };
+                output.push_str(&format!("\n{}    {} {}", indent, arrow, suggestion));
             }
         }
         CheckStatus::Fail { reason, suggestion } => {
@@ -229,12 +248,46 @@ fn status_icon(is_ok: bool, no_color: bool) -> &'static str {
     }
 }
 
+/// Get status icon with warning support.
+fn status_icon_detailed(status: &CheckStatus, no_color: bool) -> &'static str {
+    match status {
+        CheckStatus::Pass { .. } => {
+            if no_color { "[OK]" } else { "\u{2713}" } // ✓
+        }
+        CheckStatus::Warning { .. } => {
+            if no_color { "[!!]" } else { "\u{26A0}" } // ⚠
+        }
+        CheckStatus::Fail { .. } | CheckStatus::Timeout { .. } => {
+            if no_color { "[!!]" } else { "\u{2717}" } // ✗
+        }
+        CheckStatus::Skipped { .. } => {
+            if no_color { "[--]" } else { "\u{23ED}" } // ⏭
+        }
+    }
+}
+
 /// Colorize a line based on status.
 fn colorize_line(line: &str, is_ok: bool, no_color: bool) -> String {
     if no_color {
         line.to_string()
     } else {
         let color = if is_ok { "green" } else { "red" };
+        let style = Style::new().color(Color::parse(color).unwrap());
+        style.render(line, ColorSystem::TrueColor)
+    }
+}
+
+/// Colorize a line based on CheckStatus (with warning support).
+fn colorize_line_status(line: &str, status: &CheckStatus, no_color: bool) -> String {
+    if no_color {
+        line.to_string()
+    } else {
+        let color = match status {
+            CheckStatus::Pass { .. } => "green",
+            CheckStatus::Warning { .. } => "yellow",
+            CheckStatus::Fail { .. } | CheckStatus::Timeout { .. } => "red",
+            CheckStatus::Skipped { .. } => "bright_black",
+        };
         let style = Style::new().color(Color::parse(color).unwrap());
         style.render(line, ColorSystem::TrueColor)
     }
@@ -317,6 +370,12 @@ pub fn render_md(report: &DoctorReport) -> Result<String> {
                 "| Authenticated | {} |\n",
                 format_check_status_md(&health.authenticated)
             ));
+            if let Some(ref cred_health) = health.credential_health {
+                output.push_str(&format!(
+                    "| Credential health | {} |\n",
+                    format_check_status_md(cred_health)
+                ));
+            }
             output.push_str(&format!(
                 "| API reachable | {} |\n",
                 format_check_status_md(&health.api_reachable)
@@ -347,6 +406,14 @@ fn format_check_status_md(check: &DiagnosticCheck) -> String {
                 Some(d) => format!("{} {}", icon, d),
                 None => format!("{} OK", icon),
             }
+        }
+        CheckStatus::Warning { details, suggestion } => {
+            let icon = "\u{26A0}\u{FE0F}"; // ⚠️
+            let mut s = format!("{} {}", icon, details);
+            if let Some(sug) = suggestion {
+                s.push_str(&format!(" *({})* ", sug));
+            }
+            s
         }
         CheckStatus::Fail { reason, suggestion } => {
             let icon = "\u{274C}"; // ❌
@@ -393,6 +460,7 @@ mod tests {
             cli_installed: ok_check.clone(),
             cli_version: Some("0.6.0".to_string()),
             authenticated: ok_check.clone(),
+            credential_health: None,
             api_reachable: ok_check.clone(),
         };
 
@@ -401,6 +469,7 @@ mod tests {
             cli_installed: ok_check.clone(),
             cli_version: Some("1.0.30".to_string()),
             authenticated: fail_check,
+            credential_health: None,
             api_reachable: ok_check.clone(),
         };
 
