@@ -79,6 +79,9 @@ pub enum Commands {
 
     /// Diagnose caut setup and provider health
     Doctor(DoctorArgs),
+
+    /// Output usage for shell prompt integration (fast, cached)
+    Prompt(PromptArgs),
 }
 
 /// History subcommands.
@@ -259,6 +262,59 @@ pub struct DoctorArgs {
     /// Timeout for each provider check in seconds
     #[arg(long, default_value = "5")]
     pub timeout: u64,
+}
+
+/// Arguments for the `prompt` command.
+#[derive(Parser, Debug)]
+pub struct PromptArgs {
+    /// Provider to show (defaults to primary configured provider)
+    #[arg(short, long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// Output format
+    #[arg(long, value_enum, default_value = "compact")]
+    pub prompt_format: PromptFormat,
+
+    /// Include ANSI color codes
+    #[arg(long)]
+    pub color: bool,
+
+    /// Disable ANSI color codes
+    #[arg(long)]
+    pub no_color: bool,
+
+    /// Maximum cache age in seconds before showing empty (default: 60)
+    #[arg(long, value_name = "SECONDS", default_value = "60")]
+    pub cache_max_age: u64,
+
+    /// Generate shell integration snippet and exit
+    #[arg(long, value_enum)]
+    pub install: Option<ShellType>,
+}
+
+/// Prompt output format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum PromptFormat {
+    /// Compact format: "claude:45%|$12"
+    #[default]
+    Compact,
+    /// Full format: "claude:45%/67% codex:$12"
+    Full,
+    /// Minimal format: "45%"
+    Minimal,
+    /// Icon format: "⚡45%"
+    Icon,
+}
+
+/// Shell type for installation snippets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ShellType {
+    /// Bash shell
+    Bash,
+    /// Zsh shell
+    Zsh,
+    /// Fish shell
+    Fish,
 }
 
 /// Token account subcommands.

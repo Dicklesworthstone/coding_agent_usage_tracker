@@ -72,6 +72,12 @@ impl AppPaths {
         self.data.join("usage-history.sqlite")
     }
 
+    /// Path to shell prompt cache file.
+    #[must_use]
+    pub fn prompt_cache_file(&self) -> PathBuf {
+        self.cache.join("prompt-cache.json")
+    }
+
     /// Ensure all directories exist.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.config)?;
