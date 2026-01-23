@@ -1,5 +1,6 @@
 //! Core data models and provider infrastructure.
 
+pub mod budgets;
 pub mod cli_runner;
 pub mod cost_scanner;
 pub mod credential_health;
@@ -22,6 +23,11 @@ pub use credential_health::{
     check_oauth_file, check_oauth_json, get_reauth_instructions,
 };
 pub use doctor::{CheckStatus, DiagnosticCheck, DoctorReport, ProviderHealth};
+pub use budgets::{
+    BudgetConfig, BudgetFileConfig, BudgetLimits, BudgetPriority, BudgetSources, BudgetViolation,
+    CurrentUsage, ProviderBudgetConfig, ResolvedBudget, ViolationType, check_budget_violations,
+    resolve_budget,
+};
 pub use fetch_plan::{FetchAttempt, FetchOutcome, FetchStrategy};
 pub use models::{
     CostDailyEntry, CostPayload, CostTotals, CreditEvent, CreditsSnapshot, OpenAIDashboardSnapshot,
