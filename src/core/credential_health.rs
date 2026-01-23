@@ -68,7 +68,10 @@ impl JwtHealth {
     pub fn is_valid(&self) -> bool {
         matches!(
             self,
-            Self::Valid { .. } | Self::ExpiringToday { .. } | Self::ExpiringSoon { .. } | Self::NoExpiration
+            Self::Valid { .. }
+                | Self::ExpiringToday { .. }
+                | Self::ExpiringSoon { .. }
+                | Self::NoExpiration
         )
     }
 
@@ -216,23 +219,32 @@ impl JwtHealthChecker {
 
                 if remaining_secs < 0 {
                     // Token has expired
-                    let expired_at = DateTime::from_timestamp(exp_timestamp, 0)
-                        .unwrap_or_else(Utc::now);
+                    let expired_at =
+                        DateTime::from_timestamp(exp_timestamp, 0).unwrap_or_else(Utc::now);
                     JwtHealth::Expired { expired_at }
                 } else {
                     let expires_in = Duration::from_secs(remaining_secs.unsigned_abs());
-                    let expires_at = DateTime::from_timestamp(exp_timestamp, 0)
-                        .unwrap_or_else(Utc::now);
+                    let expires_at =
+                        DateTime::from_timestamp(exp_timestamp, 0).unwrap_or_else(Utc::now);
 
                     if remaining_secs < 3600 {
                         // Expires within 1 hour
-                        JwtHealth::ExpiringSoon { expires_in, expires_at }
+                        JwtHealth::ExpiringSoon {
+                            expires_in,
+                            expires_at,
+                        }
                     } else if remaining_secs < 86400 {
                         // Expires within 24 hours
-                        JwtHealth::ExpiringToday { expires_in, expires_at }
+                        JwtHealth::ExpiringToday {
+                            expires_in,
+                            expires_at,
+                        }
                     } else {
                         // Valid with time to spare
-                        JwtHealth::Valid { expires_in, expires_at }
+                        JwtHealth::Valid {
+                            expires_in,
+                            expires_at,
+                        }
                     }
                 }
             }
@@ -283,8 +295,8 @@ fn decode_jwt_exp_claims(token: &str) -> Result<JwtExpClaims, String> {
     }
 
     // Decode base64
-    let decoded = base64_decode(&payload_std)
-        .ok_or_else(|| "failed to decode base64 payload".to_string())?;
+    let decoded =
+        base64_decode(&payload_std).ok_or_else(|| "failed to decode base64 payload".to_string())?;
 
     // Parse JSON
     serde_json::from_slice::<JwtExpClaims>(&decoded)
@@ -293,8 +305,7 @@ fn decode_jwt_exp_claims(token: &str) -> Result<JwtExpClaims, String> {
 
 /// Simple base64 decoder (standard alphabet with padding).
 fn base64_decode(input: &str) -> Option<Vec<u8>> {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     let mut result = Vec::new();
     let mut buffer = 0u32;
@@ -374,7 +385,10 @@ impl OAuthHealth {
     #[must_use]
     pub fn needs_attention(&self) -> bool {
         self.access.needs_attention()
-            || self.refresh.as_ref().map_or(false, JwtHealth::needs_attention)
+            || self
+                .refresh
+                .as_ref()
+                .map_or(false, JwtHealth::needs_attention)
     }
 
     /// Returns a description of the credential health.
@@ -413,7 +427,11 @@ pub struct CredentialHealthReport {
 impl CredentialHealthReport {
     /// Create a new credential health report.
     #[must_use]
-    pub fn new(provider: Provider, credential_type: CredentialType, health: CredentialHealth) -> Self {
+    pub fn new(
+        provider: Provider,
+        credential_type: CredentialType,
+        health: CredentialHealth,
+    ) -> Self {
         let suggested_action = health.suggested_action(&provider);
         Self {
             provider,
@@ -516,12 +534,11 @@ impl CredentialHealth {
             Self::Jwt(jwt) if jwt.needs_attention() => {
                 Some(format!("Run: {} auth login", provider.cli_name()))
             }
-            Self::Missing => {
-                Some(format!("Run: {} auth login", provider.cli_name()))
-            }
-            Self::CheckFailed(_) => {
-                Some(format!("Run: caut doctor --provider {}", provider.cli_name()))
-            }
+            Self::Missing => Some(format!("Run: {} auth login", provider.cli_name())),
+            Self::CheckFailed(_) => Some(format!(
+                "Run: caut doctor --provider {}",
+                provider.cli_name()
+            )),
             _ => None,
         }
     }
@@ -656,10 +673,16 @@ impl SourceHealth {
     pub fn is_expiring_soon(&self) -> bool {
         match &self.health {
             CredentialHealth::OAuth(oauth) => {
-                matches!(oauth.access, JwtHealth::ExpiringSoon { .. } | JwtHealth::ExpiringToday { .. })
+                matches!(
+                    oauth.access,
+                    JwtHealth::ExpiringSoon { .. } | JwtHealth::ExpiringToday { .. }
+                )
             }
             CredentialHealth::Jwt(jwt) => {
-                matches!(jwt, JwtHealth::ExpiringSoon { .. } | JwtHealth::ExpiringToday { .. })
+                matches!(
+                    jwt,
+                    JwtHealth::ExpiringSoon { .. } | JwtHealth::ExpiringToday { .. }
+                )
             }
             _ => false,
         }
@@ -703,21 +726,25 @@ impl ProviderAuthHealth {
         match self.overall {
             OverallHealth::Expired => Some(format!(
                 "Auth expired! {}",
-                self.recommended_action.as_deref().unwrap_or("Re-authenticate")
+                self.recommended_action
+                    .as_deref()
+                    .unwrap_or("Re-authenticate")
             )),
             OverallHealth::ExpiringSoon => {
                 // Find the source that's expiring and get its time
-                let expiring_desc = self.sources.iter()
+                let expiring_desc = self
+                    .sources
+                    .iter()
                     .find(|s| s.is_expiring_soon())
                     .map(|s| s.health.description())
                     .unwrap_or_else(|| "expiring soon".to_string());
-                Some(format!(
-                    "Auth {expiring_desc}. Consider re-authenticating."
-                ))
+                Some(format!("Auth {expiring_desc}. Consider re-authenticating."))
             }
             OverallHealth::Missing => Some(format!(
                 "Auth missing! {}",
-                self.recommended_action.as_deref().unwrap_or("Please authenticate")
+                self.recommended_action
+                    .as_deref()
+                    .unwrap_or("Please authenticate")
             )),
             OverallHealth::Unknown => Some("Auth status unknown".to_string()),
             OverallHealth::Healthy => None,
@@ -796,11 +823,15 @@ impl AuthHealthAggregator {
         }
 
         // Check for worst status (worst wins)
-        let has_missing = sources.iter().any(|s| matches!(s.health, CredentialHealth::Missing));
+        let has_missing = sources
+            .iter()
+            .any(|s| matches!(s.health, CredentialHealth::Missing));
         let has_expired = sources.iter().any(SourceHealth::is_expired);
         let has_expiring = sources.iter().any(SourceHealth::is_expiring_soon);
         let all_valid = sources.iter().all(SourceHealth::is_valid);
-        let has_check_failed = sources.iter().any(|s| matches!(s.health, CredentialHealth::CheckFailed(_)));
+        let has_check_failed = sources
+            .iter()
+            .any(|s| matches!(s.health, CredentialHealth::CheckFailed(_)));
 
         if has_missing {
             OverallHealth::Missing
@@ -884,7 +915,11 @@ mod tests {
         }
 
         // Convert to base64url (no padding, URL-safe chars)
-        result.replace('+', "-").replace('/', "_").trim_end_matches('=').to_string()
+        result
+            .replace('+', "-")
+            .replace('/', "_")
+            .trim_end_matches('=')
+            .to_string()
     }
 
     fn make_test_jwt(claims_json: &str) -> String {
@@ -980,10 +1015,7 @@ mod tests {
             checker.check("only.two"),
             JwtHealth::Invalid { .. }
         ));
-        assert!(matches!(
-            checker.check("one"),
-            JwtHealth::Invalid { .. }
-        ));
+        assert!(matches!(checker.check("one"), JwtHealth::Invalid { .. }));
     }
 
     #[test]
@@ -1196,7 +1228,10 @@ mod tests {
     #[test]
     fn overall_health_severity() {
         assert_eq!(OverallHealth::Healthy.severity(), HealthSeverity::Ok);
-        assert_eq!(OverallHealth::ExpiringSoon.severity(), HealthSeverity::Warning);
+        assert_eq!(
+            OverallHealth::ExpiringSoon.severity(),
+            HealthSeverity::Warning
+        );
         assert_eq!(OverallHealth::Expired.severity(), HealthSeverity::Critical);
         assert_eq!(OverallHealth::Missing.severity(), HealthSeverity::Critical);
         assert_eq!(OverallHealth::Unknown.severity(), HealthSeverity::Warning);

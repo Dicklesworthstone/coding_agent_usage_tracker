@@ -10,14 +10,16 @@ pub mod logging;
 pub mod models;
 pub mod pipeline;
 pub mod prediction;
+pub mod pricing;
 pub mod provider;
+pub mod session_logs;
 pub mod status;
 
 pub use cost_scanner::CostScanner;
 pub use credential_health::{
-    check_oauth_file, check_oauth_json, get_reauth_instructions, AuthHealthAggregator,
-    CredentialHealth, CredentialHealthReport, CredentialType, HealthSeverity, JwtHealth,
-    JwtHealthChecker, OAuthHealth, OverallHealth, ProviderAuthHealth, SourceHealth,
+    AuthHealthAggregator, CredentialHealth, CredentialHealthReport, CredentialType, HealthSeverity,
+    JwtHealth, JwtHealthChecker, OAuthHealth, OverallHealth, ProviderAuthHealth, SourceHealth,
+    check_oauth_file, check_oauth_json, get_reauth_instructions,
 };
 pub use doctor::{CheckStatus, DiagnosticCheck, DoctorReport, ProviderHealth};
 pub use fetch_plan::{FetchAttempt, FetchOutcome, FetchStrategy};
@@ -28,4 +30,11 @@ pub use models::{
 };
 pub use prediction::{calculate_velocity, detect_reset, smoothed_velocity};
 pub use provider::{Provider, ProviderDescriptor, ProviderRegistry, ProviderSelection};
+pub use session_logs::{
+    ClaudeSessionParser, CodexSessionParser, SessionLogFinder, SessionLogPath, SessionUsage,
+};
+pub use pricing::{
+    CostConfidence, ModelPricing, PricingTable, SessionCost, SessionCostCalculator,
+    TokenCostBreakdown,
+};
 pub use status::StatusFetcher;

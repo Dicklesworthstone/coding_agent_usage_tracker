@@ -233,9 +233,7 @@ fn write_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("."));
     let temp_path = parent.join(format!(
         ".{}.tmp.{}",
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("cache"),
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("cache"),
         std::process::id()
     ));
 
@@ -385,8 +383,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache_path = tmp.path().join("missing.json");
 
-        let result: Result<Option<TestData>> =
-            read_if_fresh(&cache_path, Duration::from_secs(60));
+        let result: Result<Option<TestData>> = read_if_fresh(&cache_path, Duration::from_secs(60));
         assert!(result.unwrap().is_none());
     }
 

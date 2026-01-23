@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use crate::cli::args::{PromptArgs, PromptFormat, ShellType};
 use crate::error::Result;
 use crate::storage::AppPaths;
-use crate::storage::cache::{is_fresh, read_if_fresh, read_with_staleness, write, write_async, Staleness};
+use crate::storage::cache::{
+    Staleness, is_fresh, read_if_fresh, read_with_staleness, write, write_async,
+};
 
 /// Cached prompt data for a provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -488,7 +490,8 @@ mod tests {
         let output = format_compact(&[&data], false);
         assert!(output.contains("cl:"));
         assert!(output.contains("46%"));
-        assert!(output.contains("$12.34"));
+        // Costs >= $10 are formatted with 1 decimal place
+        assert!(output.contains("$12.3"));
     }
 
     #[test]
@@ -552,7 +555,8 @@ mod tests {
     #[test]
     fn format_prompt_with_staleness_fresh_no_prefix() {
         let data = make_test_data();
-        let output = format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::Fresh);
+        let output =
+            format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::Fresh);
         assert_eq!(output, "46%");
         assert!(!output.starts_with('~'));
         assert!(!output.starts_with('?'));
@@ -561,23 +565,42 @@ mod tests {
     #[test]
     fn format_prompt_with_staleness_stale_prefix() {
         let data = make_test_data();
-        let output = format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::Stale);
-        assert!(output.starts_with('~'), "Expected ~ prefix for stale data: {}", output);
+        let output =
+            format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::Stale);
+        assert!(
+            output.starts_with('~'),
+            "Expected ~ prefix for stale data: {}",
+            output
+        );
         assert!(output.contains("46%"));
     }
 
     #[test]
     fn format_prompt_with_staleness_very_stale_prefix() {
         let data = make_test_data();
-        let output = format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::VeryStale);
-        assert!(output.starts_with('?'), "Expected ? prefix for very stale data: {}", output);
+        let output = format_prompt_with_staleness(
+            &[&data],
+            PromptFormat::Minimal,
+            false,
+            Staleness::VeryStale,
+        );
+        assert!(
+            output.starts_with('?'),
+            "Expected ? prefix for very stale data: {}",
+            output
+        );
         assert!(output.contains("46%"));
     }
 
     #[test]
     fn format_prompt_with_empty_providers_no_prefix() {
         let providers: Vec<&ProviderPromptData> = vec![];
-        let output = format_prompt_with_staleness(&providers, PromptFormat::Minimal, false, Staleness::Stale);
+        let output = format_prompt_with_staleness(
+            &providers,
+            PromptFormat::Minimal,
+            false,
+            Staleness::Stale,
+        );
         assert_eq!(output, ""); // Empty output should not have prefix
     }
 }

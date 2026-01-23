@@ -170,12 +170,15 @@ fn render_check_line(check: &DiagnosticCheck, indent: &str, no_color: bool) -> S
                 output.push_str(&format!("  {}", details));
             }
         }
-        CheckStatus::Warning { details, suggestion } => {
+        CheckStatus::Warning {
+            details,
+            suggestion,
+        } => {
             output.push('\n');
             output.push_str(&colorize_line_status(
                 &format!("{}    {}", indent, details),
                 &check.status,
-                no_color
+                no_color,
             ));
             if let Some(suggestion) = suggestion {
                 let arrow = if no_color { "->" } else { "\u{2192}" };
@@ -405,7 +408,10 @@ fn format_check_status_md(check: &DiagnosticCheck) -> String {
                 None => format!("{} OK", icon),
             }
         }
-        CheckStatus::Warning { details, suggestion } => {
+        CheckStatus::Warning {
+            details,
+            suggestion,
+        } => {
             let icon = "\u{26A0}\u{FE0F}"; // ⚠️
             let mut s = format!("{} {}", icon, details);
             if let Some(sug) = suggestion {
