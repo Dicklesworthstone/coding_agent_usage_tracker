@@ -134,10 +134,7 @@ impl<'a> ProviderPanel<'a> {
                 StatusIndicator::Maintenance => ("🔧", Color::Blue),
                 StatusIndicator::Unknown => ("?", Color::DarkGray),
             };
-            let description = status
-                .description
-                .as_deref()
-                .unwrap_or("Unknown status");
+            let description = status.description.as_deref().unwrap_or("Unknown status");
             lines.push(Line::from(vec![
                 Span::styled(status_icon, Style::default().fg(status_color)),
                 Span::raw(" "),

@@ -10,9 +10,9 @@ use crate::cli::usage::{UsageResults, fetch_usage};
 use crate::core::models::ProviderPayload;
 use crate::error::{CautError, Result};
 
+use super::Tui;
 use super::dashboard::Dashboard;
 use super::event::{Event, EventHandler, KeyAction};
-use super::Tui;
 
 /// Result type for the app.
 pub type AppResult<T> = std::result::Result<T, CautError>;

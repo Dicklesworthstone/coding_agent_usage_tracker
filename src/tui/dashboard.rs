@@ -251,9 +251,7 @@ impl Widget for Dashboard<'_> {
         let content_area = chunks[1];
         let (_, panel_areas) = self.calculate_grid(content_area);
 
-        for (i, (payload, panel_area)) in
-            self.payloads.iter().zip(panel_areas.iter()).enumerate()
-        {
+        for (i, (payload, panel_area)) in self.payloads.iter().zip(panel_areas.iter()).enumerate() {
             let is_selected = i == self.selected;
             let panel = ProviderPanel::new(payload, is_selected);
             panel.render(*panel_area, buf);

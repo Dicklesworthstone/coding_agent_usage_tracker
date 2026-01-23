@@ -532,9 +532,7 @@ impl ProvidersConfig {
     /// or if its settings have `enabled: true`.
     #[must_use]
     pub fn is_enabled(&self, provider_name: &str) -> bool {
-        self.settings
-            .get(provider_name)
-            .map_or(true, |s| s.enabled)
+        self.settings.get(provider_name).map_or(true, |s| s.enabled)
     }
 }
 
@@ -687,7 +685,9 @@ impl Config {
         let settings = self.providers.get_settings(provider.cli_name());
         EffectiveProviderSettings {
             enabled: settings.enabled,
-            priority: settings.priority.unwrap_or_else(|| provider.default_priority()),
+            priority: settings
+                .priority
+                .unwrap_or_else(|| provider.default_priority()),
             timeout: std::time::Duration::from_secs(
                 settings
                     .timeout_seconds

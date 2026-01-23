@@ -15,10 +15,10 @@ use crate::cli::args::{
 };
 use crate::core::provider::Provider;
 use crate::error::{CautError, Result};
-use crate::render::human::{render_history_chart, HistoryDay, HistoryRenderOptions};
+use crate::render::human::{HistoryDay, HistoryRenderOptions, render_history_chart};
 use crate::storage::{
-    AppPaths, HistoryStore, RetentionPolicy, StoredSnapshot, DEFAULT_AGGREGATE_RETENTION_DAYS,
-    DEFAULT_DETAILED_RETENTION_DAYS, DEFAULT_MAX_SIZE_BYTES,
+    AppPaths, DEFAULT_AGGREGATE_RETENTION_DAYS, DEFAULT_DETAILED_RETENTION_DAYS,
+    DEFAULT_MAX_SIZE_BYTES, HistoryStore, RetentionPolicy, StoredSnapshot,
 };
 
 /// Execute history commands.

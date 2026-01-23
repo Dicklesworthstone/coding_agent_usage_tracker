@@ -1823,7 +1823,11 @@ mod tests {
             .provider()
             .is_none()
         );
-        assert!(CautError::AccountRequiresSingleProvider.provider().is_none());
+        assert!(
+            CautError::AccountRequiresSingleProvider
+                .provider()
+                .is_none()
+        );
         assert!(CautError::AllAccountsConflict.provider().is_none());
         assert!(CautError::MissingRateLimit.provider().is_none());
         assert!(CautError::PartialFailure { failed: 1 }.provider().is_none());
@@ -1984,11 +1988,9 @@ mod tests {
             let code = err.error_code();
             let actual_prefix = &code[5..6]; // "CAUT-X001" -> "X"
             assert_eq!(
-                actual_prefix,
-                expected_prefix,
+                actual_prefix, expected_prefix,
                 "Error code {} should have prefix {}",
-                code,
-                expected_prefix
+                code, expected_prefix
             );
             assert_eq!(
                 err.category().code_prefix(),

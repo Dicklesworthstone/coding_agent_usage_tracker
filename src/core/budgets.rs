@@ -464,7 +464,10 @@ pub fn check_budget_violations(
                 ViolationType::DailyCost,
                 limit,
                 current,
-                budget.sources.daily_cost_usd.unwrap_or(BudgetPriority::Global),
+                budget
+                    .sources
+                    .daily_cost_usd
+                    .unwrap_or(BudgetPriority::Global),
             ));
         }
     }
@@ -476,7 +479,10 @@ pub fn check_budget_violations(
                 ViolationType::WeeklyCost,
                 limit,
                 current,
-                budget.sources.weekly_cost_usd.unwrap_or(BudgetPriority::Global),
+                budget
+                    .sources
+                    .weekly_cost_usd
+                    .unwrap_or(BudgetPriority::Global),
             ));
         }
     }
@@ -488,7 +494,10 @@ pub fn check_budget_violations(
                 ViolationType::MonthlyCost,
                 limit,
                 current,
-                budget.sources.monthly_cost_usd.unwrap_or(BudgetPriority::Global),
+                budget
+                    .sources
+                    .monthly_cost_usd
+                    .unwrap_or(BudgetPriority::Global),
             ));
         }
     }
@@ -511,9 +520,10 @@ pub fn check_budget_violations(
     }
 
     // Check weekly usage percent
-    if let (Some(limit), Some(current)) =
-        (budget.limits.weekly_usage_percent, usage.weekly_usage_percent)
-    {
+    if let (Some(limit), Some(current)) = (
+        budget.limits.weekly_usage_percent,
+        usage.weekly_usage_percent,
+    ) {
         if current >= limit {
             violations.push(BudgetViolation::new(
                 ViolationType::WeeklyUsage,
@@ -534,34 +544,41 @@ pub fn check_budget_violations(
                 ViolationType::DailyCredits,
                 limit,
                 current,
-                budget.sources.daily_credits.unwrap_or(BudgetPriority::Global),
+                budget
+                    .sources
+                    .daily_credits
+                    .unwrap_or(BudgetPriority::Global),
             ));
         }
     }
 
     // Check alert thresholds for cost-based limits
     // Use the most relevant limit for threshold checking
-    let (primary_limit, primary_current, primary_source) =
-        if let (Some(limit), Some(current)) = (budget.limits.daily_cost_usd, usage.daily_cost_usd) {
-            (
-                limit,
-                current,
-                budget.sources.daily_cost_usd.unwrap_or(BudgetPriority::Global),
-            )
-        } else if let (Some(limit), Some(current)) =
-            (budget.limits.weekly_cost_usd, usage.weekly_cost_usd)
-        {
-            (
-                limit,
-                current,
-                budget
-                    .sources
-                    .weekly_cost_usd
-                    .unwrap_or(BudgetPriority::Global),
-            )
-        } else {
-            return violations;
-        };
+    let (primary_limit, primary_current, primary_source) = if let (Some(limit), Some(current)) =
+        (budget.limits.daily_cost_usd, usage.daily_cost_usd)
+    {
+        (
+            limit,
+            current,
+            budget
+                .sources
+                .daily_cost_usd
+                .unwrap_or(BudgetPriority::Global),
+        )
+    } else if let (Some(limit), Some(current)) =
+        (budget.limits.weekly_cost_usd, usage.weekly_cost_usd)
+    {
+        (
+            limit,
+            current,
+            budget
+                .sources
+                .weekly_cost_usd
+                .unwrap_or(BudgetPriority::Global),
+        )
+    } else {
+        return violations;
+    };
 
     // Check each alert threshold
     for &threshold in &budget.limits.alert_at_percent {
@@ -874,9 +891,11 @@ mod tests {
 
         let violations = check_budget_violations(&budget, &usage);
         // Should have alert for 75% threshold (not 90% since we're at 80%)
-        assert!(violations
-            .iter()
-            .any(|v| v.violation_type == ViolationType::AlertThreshold));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.violation_type == ViolationType::AlertThreshold)
+        );
     }
 
     #[test]

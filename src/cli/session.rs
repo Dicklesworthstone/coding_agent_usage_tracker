@@ -6,7 +6,9 @@
 use crate::cli::args::{OutputFormat, SessionArgs};
 use crate::core::pricing::SessionCostCalculator;
 use crate::core::provider::Provider;
-use crate::core::session_logs::{ClaudeSessionParser, CodexSessionParser, SessionLogFinder, SessionLogPath, SessionUsage};
+use crate::core::session_logs::{
+    ClaudeSessionParser, CodexSessionParser, SessionLogFinder, SessionLogPath, SessionUsage,
+};
 use crate::error::{CautError, Result};
 use chrono::{DateTime, Duration, Local, Utc};
 use serde::Serialize;
@@ -210,10 +212,7 @@ fn calculate_totals(sessions: &[SessionSummary]) -> SessionTotals {
     let total_cost_usd: f64 = sessions.iter().map(|s| s.total_cost_usd).sum();
     let total_input_tokens: i64 = sessions.iter().map(|s| s.input_tokens).sum();
     let total_output_tokens: i64 = sessions.iter().map(|s| s.output_tokens).sum();
-    let total_duration_minutes: i64 = sessions
-        .iter()
-        .filter_map(|s| s.duration_minutes)
-        .sum();
+    let total_duration_minutes: i64 = sessions.iter().filter_map(|s| s.duration_minutes).sum();
 
     let cost_per_hour_usd = if total_duration_minutes > 0 {
         Some(total_cost_usd / (total_duration_minutes as f64 / 60.0))
@@ -289,14 +288,24 @@ fn render_session(buf: &mut String, session: &SessionSummary, no_color: bool) {
 
     // Session header
     if no_color {
-        writeln!(buf, "[{}] {} ({})", provider_display, session.session_id, session.confidence).ok();
+        writeln!(
+            buf,
+            "[{}] {} ({})",
+            provider_display, session.session_id, session.confidence
+        )
+        .ok();
     } else {
         let color = match session.provider.as_str() {
             "claude" => "\x1b[38;5;208m", // Orange for Claude
             "codex" => "\x1b[38;5;82m",   // Green for Codex
             _ => "\x1b[37m",
         };
-        writeln!(buf, "{}[{}]\x1b[0m {} \x1b[2m({})\x1b[0m", color, provider_display, session.session_id, session.confidence).ok();
+        writeln!(
+            buf,
+            "{}[{}]\x1b[0m {} \x1b[2m({})\x1b[0m",
+            color, provider_display, session.session_id, session.confidence
+        )
+        .ok();
     }
 
     // Time info
@@ -305,9 +314,13 @@ fn render_session(buf: &mut String, session: &SessionSummary, no_color: bool) {
         let local_end = end.with_timezone(&Local);
         let duration = session.duration_minutes.unwrap_or(0);
 
-        write!(buf, "  Time: {} - {}",
+        write!(
+            buf,
+            "  Time: {} - {}",
             local_start.format("%H:%M"),
-            local_end.format("%H:%M")).ok();
+            local_end.format("%H:%M")
+        )
+        .ok();
 
         if duration > 0 {
             let hours = duration / 60;
@@ -333,21 +346,34 @@ fn render_session(buf: &mut String, session: &SessionSummary, no_color: bool) {
         } else {
             "\x1b[32m" // Green for cheap
         };
-        writeln!(buf, "  Cost: {}${:.2}\x1b[0m", cost_color, session.total_cost_usd).ok();
+        writeln!(
+            buf,
+            "  Cost: {}${:.2}\x1b[0m",
+            cost_color, session.total_cost_usd
+        )
+        .ok();
     }
 
     // Tokens
     let total_tokens = session.input_tokens + session.output_tokens;
-    writeln!(buf, "  Tokens: {}K in / {}K out ({:.0}K total)",
+    writeln!(
+        buf,
+        "  Tokens: {}K in / {}K out ({:.0}K total)",
         session.input_tokens / 1000,
         session.output_tokens / 1000,
-        total_tokens as f64 / 1000.0).ok();
+        total_tokens as f64 / 1000.0
+    )
+    .ok();
 
     // Cache tokens if present
     if session.cache_read_tokens > 0 || session.cache_creation_tokens > 0 {
-        writeln!(buf, "  Cache: {}K read / {}K created",
+        writeln!(
+            buf,
+            "  Cache: {}K read / {}K created",
             session.cache_read_tokens / 1000,
-            session.cache_creation_tokens / 1000).ok();
+            session.cache_creation_tokens / 1000
+        )
+        .ok();
     }
 
     // Model
@@ -396,7 +422,12 @@ fn render_markdown(output: &SessionOutput) -> String {
     let mut buf = String::new();
 
     writeln!(buf, "# Session Summary\n").ok();
-    writeln!(buf, "Generated: {}\n", output.generated_at.format("%Y-%m-%d %H:%M:%S UTC")).ok();
+    writeln!(
+        buf,
+        "Generated: {}\n",
+        output.generated_at.format("%Y-%m-%d %H:%M:%S UTC")
+    )
+    .ok();
 
     if output.sessions.is_empty() {
         writeln!(buf, "No sessions found.\n").ok();
@@ -404,22 +435,35 @@ fn render_markdown(output: &SessionOutput) -> String {
     }
 
     // Sessions table
-    writeln!(buf, "| Provider | Session | Duration | Cost | Tokens | Model |").ok();
-    writeln!(buf, "|----------|---------|----------|------|--------|-------|").ok();
+    writeln!(
+        buf,
+        "| Provider | Session | Duration | Cost | Tokens | Model |"
+    )
+    .ok();
+    writeln!(
+        buf,
+        "|----------|---------|----------|------|--------|-------|"
+    )
+    .ok();
 
     for session in &output.sessions {
-        let duration = session.duration_minutes
+        let duration = session
+            .duration_minutes
             .map(|m| format!("{}m", m))
             .unwrap_or_else(|| "-".to_string());
         let tokens = format!("{}K", (session.input_tokens + session.output_tokens) / 1000);
 
-        writeln!(buf, "| {} | {} | {} | ${:.2} | {} | {} |",
+        writeln!(
+            buf,
+            "| {} | {} | {} | ${:.2} | {} | {} |",
             session.provider,
             &session.session_id[..session.session_id.len().min(12)],
             duration,
             session.total_cost_usd,
             tokens,
-            session.primary_model).ok();
+            session.primary_model
+        )
+        .ok();
     }
 
     // Totals
@@ -427,10 +471,19 @@ fn render_markdown(output: &SessionOutput) -> String {
         writeln!(buf, "\n## Totals\n").ok();
         writeln!(buf, "- **Sessions**: {}", totals.session_count).ok();
         writeln!(buf, "- **Total Cost**: ${:.2}", totals.total_cost_usd).ok();
-        writeln!(buf, "- **Total Tokens**: {:.0}K",
-            (totals.total_input_tokens + totals.total_output_tokens) as f64 / 1000.0).ok();
+        writeln!(
+            buf,
+            "- **Total Tokens**: {:.0}K",
+            (totals.total_input_tokens + totals.total_output_tokens) as f64 / 1000.0
+        )
+        .ok();
         if totals.total_duration_minutes > 0 {
-            writeln!(buf, "- **Total Time**: {} minutes", totals.total_duration_minutes).ok();
+            writeln!(
+                buf,
+                "- **Total Time**: {} minutes",
+                totals.total_duration_minutes
+            )
+            .ok();
         }
         if let Some(cost_per_hour) = totals.cost_per_hour_usd {
             writeln!(buf, "- **Cost/Hour**: ${:.2}", cost_per_hour).ok();

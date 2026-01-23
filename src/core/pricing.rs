@@ -59,11 +59,18 @@ impl ModelPricing {
 
     /// Calculate cost for given token counts.
     #[must_use]
-    pub fn calculate_cost(&self, input: i64, output: i64, cache_read: i64, cache_creation: i64) -> TokenCostBreakdown {
+    pub fn calculate_cost(
+        &self,
+        input: i64,
+        output: i64,
+        cache_read: i64,
+        cache_creation: i64,
+    ) -> TokenCostBreakdown {
         let input_cost = (input as f64 / 1_000_000.0) * self.input_per_million;
         let output_cost = (output as f64 / 1_000_000.0) * self.output_per_million;
         let cache_read_cost = (cache_read as f64 / 1_000_000.0) * self.cache_read_per_million;
-        let cache_creation_cost = (cache_creation as f64 / 1_000_000.0) * self.cache_creation_per_million;
+        let cache_creation_cost =
+            (cache_creation as f64 / 1_000_000.0) * self.cache_creation_per_million;
 
         TokenCostBreakdown {
             input_cost_usd: input_cost,
@@ -112,31 +119,73 @@ impl PricingTable {
 
         // Anthropic Claude models (as of Jan 2026)
         // Claude Opus 4.5: $15/$75 per million
-        Self::add_model(&mut models, "claude-opus-4-5-20251101", 15.0, 75.0, 1.5, 18.75);
+        Self::add_model(
+            &mut models,
+            "claude-opus-4-5-20251101",
+            15.0,
+            75.0,
+            1.5,
+            18.75,
+        );
         Self::add_model(&mut models, "claude-opus-4.5", 15.0, 75.0, 1.5, 18.75);
         Self::add_model(&mut models, "claude-4-opus", 15.0, 75.0, 1.5, 18.75);
 
         // Claude Sonnet 4: $3/$15 per million
-        Self::add_model(&mut models, "claude-sonnet-4-20250514", 3.0, 15.0, 0.3, 3.75);
+        Self::add_model(
+            &mut models,
+            "claude-sonnet-4-20250514",
+            3.0,
+            15.0,
+            0.3,
+            3.75,
+        );
         Self::add_model(&mut models, "claude-sonnet-4", 3.0, 15.0, 0.3, 3.75);
         Self::add_model(&mut models, "claude-4-sonnet", 3.0, 15.0, 0.3, 3.75);
 
         // Claude 3.5 Sonnet: $3/$15 per million
-        Self::add_model(&mut models, "claude-3-5-sonnet-20241022", 3.0, 15.0, 0.3, 3.75);
+        Self::add_model(
+            &mut models,
+            "claude-3-5-sonnet-20241022",
+            3.0,
+            15.0,
+            0.3,
+            3.75,
+        );
         Self::add_model(&mut models, "claude-3.5-sonnet", 3.0, 15.0, 0.3, 3.75);
         Self::add_model(&mut models, "claude-3-5-sonnet", 3.0, 15.0, 0.3, 3.75);
 
         // Claude 3 Opus: $15/$75 per million
-        Self::add_model(&mut models, "claude-3-opus-20240229", 15.0, 75.0, 1.5, 18.75);
+        Self::add_model(
+            &mut models,
+            "claude-3-opus-20240229",
+            15.0,
+            75.0,
+            1.5,
+            18.75,
+        );
         Self::add_model(&mut models, "claude-3-opus", 15.0, 75.0, 1.5, 18.75);
 
         // Claude 3.5 Haiku: $0.80/$4 per million
-        Self::add_model(&mut models, "claude-3-5-haiku-20241022", 0.8, 4.0, 0.08, 1.0);
+        Self::add_model(
+            &mut models,
+            "claude-3-5-haiku-20241022",
+            0.8,
+            4.0,
+            0.08,
+            1.0,
+        );
         Self::add_model(&mut models, "claude-3.5-haiku", 0.8, 4.0, 0.08, 1.0);
         Self::add_model(&mut models, "claude-3-5-haiku", 0.8, 4.0, 0.08, 1.0);
 
         // Claude 3 Haiku: $0.25/$1.25 per million
-        Self::add_model(&mut models, "claude-3-haiku-20240307", 0.25, 1.25, 0.03, 0.30);
+        Self::add_model(
+            &mut models,
+            "claude-3-haiku-20240307",
+            0.25,
+            1.25,
+            0.03,
+            0.30,
+        );
         Self::add_model(&mut models, "claude-3-haiku", 0.25, 1.25, 0.03, 0.30);
 
         // OpenAI GPT models (as of Jan 2026)
@@ -146,7 +195,14 @@ impl PricingTable {
 
         // GPT-4o mini: $0.15/$0.60 per million
         Self::add_model(&mut models, "gpt-4o-mini", 0.15, 0.60, 0.075, 0.15);
-        Self::add_model(&mut models, "gpt-4o-mini-2024-07-18", 0.15, 0.60, 0.075, 0.15);
+        Self::add_model(
+            &mut models,
+            "gpt-4o-mini-2024-07-18",
+            0.15,
+            0.60,
+            0.075,
+            0.15,
+        );
 
         // GPT-4.1: estimated similar to GPT-4o
         Self::add_model(&mut models, "gpt-4.1", 2.5, 10.0, 1.25, 2.5);
@@ -213,8 +269,7 @@ impl PricingTable {
         } else {
             // Conservative mid-tier estimate for unknown models
             let estimated = ModelPricing::from_static(
-                model,
-                3.0,  // input: assume Sonnet-tier
+                model, 3.0,  // input: assume Sonnet-tier
                 15.0, // output: assume Sonnet-tier
                 0.3,  // cache read
                 3.75, // cache creation
