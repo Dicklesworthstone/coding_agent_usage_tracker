@@ -35,13 +35,19 @@ impl CheckStatus {
     /// Whether this status indicates the check is ready (functional).
     #[must_use]
     pub const fn is_ready(&self) -> bool {
-        matches!(self, Self::Pass { .. } | Self::Warning { .. } | Self::Skipped { .. })
+        matches!(
+            self,
+            Self::Pass { .. } | Self::Warning { .. } | Self::Skipped { .. }
+        )
     }
 
     /// Whether this status requires attention (warning or worse).
     #[must_use]
     pub const fn needs_attention(&self) -> bool {
-        matches!(self, Self::Warning { .. } | Self::Fail { .. } | Self::Timeout { .. })
+        matches!(
+            self,
+            Self::Warning { .. } | Self::Fail { .. } | Self::Timeout { .. }
+        )
     }
 
     /// Whether this status is a warning (working but needs attention soon).
@@ -61,7 +67,10 @@ impl fmt::Display for CheckStatus {
                     write!(f, "pass")
                 }
             }
-            Self::Warning { details, suggestion } => {
+            Self::Warning {
+                details,
+                suggestion,
+            } => {
                 if let Some(suggestion) = suggestion {
                     write!(f, "warning: {details} (suggestion: {suggestion})")
                 } else {
@@ -128,7 +137,10 @@ impl ProviderHealth {
     pub fn is_ready(&self) -> bool {
         self.cli_installed.status.is_ready()
             && self.authenticated.status.is_ready()
-            && self.credential_health.as_ref().map_or(true, |c| c.status.is_ready())
+            && self
+                .credential_health
+                .as_ref()
+                .map_or(true, |c| c.status.is_ready())
             && self.api_reachable.status.is_ready()
     }
 
@@ -137,7 +149,10 @@ impl ProviderHealth {
     pub fn has_warnings(&self) -> bool {
         self.cli_installed.status.needs_attention()
             || self.authenticated.status.needs_attention()
-            || self.credential_health.as_ref().map_or(false, |c| c.status.needs_attention())
+            || self
+                .credential_health
+                .as_ref()
+                .map_or(false, |c| c.status.needs_attention())
             || self.api_reachable.status.needs_attention()
     }
 }

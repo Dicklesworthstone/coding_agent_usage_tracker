@@ -359,9 +359,11 @@ pub fn check_credential_health(provider: Provider) -> Option<DiagnosticCheck> {
 
     let status = match health.overall {
         OverallHealth::Healthy => CheckStatus::Pass {
-            details: Some(health.sources.iter()
-                .filter_map(|s| {
-                    match &s.health {
+            details: Some(
+                health
+                    .sources
+                    .iter()
+                    .filter_map(|s| match &s.health {
                         crate::core::credential_health::CredentialHealth::OAuth(oauth) => {
                             Some(format!("{}: {}", s.source_type, oauth.description()))
                         }
@@ -372,20 +374,24 @@ pub fn check_credential_health(provider: Provider) -> Option<DiagnosticCheck> {
                             Some(format!("{}: API key present", s.source_type))
                         }
                         _ => None,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ")),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
         },
         OverallHealth::ExpiringSoon => {
-            let warning_msg = health.warning_message().unwrap_or_else(|| "Token expiring soon".to_string());
+            let warning_msg = health
+                .warning_message()
+                .unwrap_or_else(|| "Token expiring soon".to_string());
             CheckStatus::Warning {
                 details: warning_msg,
                 suggestion: health.recommended_action,
             }
         }
         OverallHealth::Expired => {
-            let error_msg = health.warning_message().unwrap_or_else(|| "Token expired".to_string());
+            let error_msg = health
+                .warning_message()
+                .unwrap_or_else(|| "Token expired".to_string());
             CheckStatus::Fail {
                 reason: error_msg,
                 suggestion: health.recommended_action,
