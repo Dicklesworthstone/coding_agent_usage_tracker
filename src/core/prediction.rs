@@ -161,7 +161,7 @@ fn interval_velocities(points: &[&StoredSnapshot]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use chrono::Utc;
 
     use crate::assert_float_eq;
     use crate::core::provider::Provider;
@@ -212,12 +212,12 @@ mod tests {
 
     #[test]
     fn calculate_velocity_linear_regression() {
-        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let now = Utc::now();
         let history = vec![
-            make_snapshot_at(base, 10.0),
-            make_snapshot_at(base + Duration::hours(1), 15.0),
-            make_snapshot_at(base + Duration::hours(2), 20.0),
-            make_snapshot_at(base + Duration::hours(3), 25.0),
+            make_snapshot_at(now - Duration::hours(3), 10.0),
+            make_snapshot_at(now - Duration::hours(2), 15.0),
+            make_snapshot_at(now - Duration::hours(1), 20.0),
+            make_snapshot_at(now, 25.0),
         ];
         let velocity = calculate_velocity(&history, Duration::hours(6)).unwrap();
         assert_float_eq!(velocity, 5.0, 0.01);
@@ -256,11 +256,11 @@ mod tests {
 
     #[test]
     fn smoothed_velocity_ema() {
-        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let now = Utc::now();
         let history = vec![
-            make_snapshot_at(base, 10.0),
-            make_snapshot_at(base + Duration::hours(1), 30.0),
-            make_snapshot_at(base + Duration::hours(2), 40.0),
+            make_snapshot_at(now - Duration::hours(2), 10.0),
+            make_snapshot_at(now - Duration::hours(1), 30.0),
+            make_snapshot_at(now, 40.0),
         ];
 
         let velocity = smoothed_velocity(&history, Duration::hours(4), 0.5).unwrap();

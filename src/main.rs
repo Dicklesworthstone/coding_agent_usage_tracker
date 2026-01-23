@@ -99,6 +99,15 @@ async fn run(cli: Cli) -> caut::Result<()> {
         Some(Commands::History(cmd)) => caut::cli::history::execute(&cmd, format, pretty, no_color),
 
         Some(Commands::Prompt(args)) => caut::cli::prompt::execute(&args),
+
+        Some(Commands::Session(args)) => {
+            caut::cli::session::execute(&args, format, pretty, no_color).await
+        }
+
+        Some(Commands::Dashboard(args)) => {
+            let usage_args = args.to_usage_args();
+            caut::tui::run_dashboard(&usage_args, args.interval).await
+        }
     }
 }
 
@@ -240,6 +249,8 @@ USAGE:
 COMMANDS:
     usage           Show usage for providers (default)
     cost            Show local cost usage
+    session         Show session cost attribution
+    dashboard       Launch interactive TUI dashboard
     history         Manage usage history and retention
     token-accounts  Manage token accounts
     doctor          Diagnose caut setup and provider health
@@ -249,7 +260,10 @@ QUICK START:
     caut usage                    # Show usage for primary providers
     caut usage --provider all     # Show usage for all providers
     caut usage --status           # Include provider status
+    caut dashboard                # Launch interactive TUI dashboard
     caut cost --provider claude   # Show Claude cost usage
+    caut session                  # Show last session cost attribution
+    caut session --list           # List recent sessions with costs
     caut doctor                   # Check setup and provider health
 
 SHELL PROMPT INTEGRATION:

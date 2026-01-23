@@ -102,6 +102,7 @@ fn make_test_usage_args() -> UsageArgs {
         web_debug_dump_html: false,
         watch: false,
         interval: 30,
+        tui: false,
     }
 }
 
@@ -920,14 +921,18 @@ api_base = "https://codex.example.test"
 
     let config = Config::load_from(&config_path).expect("load config");
     assert_eq!(config.providers.default_providers, vec!["claude", "codex"]);
-    assert!(!config.providers.claude.enabled);
+
+    let claude_settings = config.providers.get_settings("claude");
+    assert!(!claude_settings.enabled);
     assert_eq!(
-        config.providers.claude.api_base.as_deref(),
+        claude_settings.api_base.as_deref(),
         Some("https://claude.example.test")
     );
-    assert!(config.providers.codex.enabled);
+
+    let codex_settings = config.providers.get_settings("codex");
+    assert!(codex_settings.enabled);
     assert_eq!(
-        config.providers.codex.api_base.as_deref(),
+        codex_settings.api_base.as_deref(),
         Some("https://codex.example.test")
     );
 }

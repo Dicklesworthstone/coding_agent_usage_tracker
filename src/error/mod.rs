@@ -1320,4 +1320,682 @@ mod tests {
             "Auth expired should have prevention tips"
         );
     }
+
+    // -------------------------------------------------------------------------
+    // ExitCode tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn exit_code_to_i32_conversion() {
+        assert_eq!(i32::from(ExitCode::Success), 0);
+        assert_eq!(i32::from(ExitCode::GeneralError), 1);
+        assert_eq!(i32::from(ExitCode::BinaryNotFound), 2);
+        assert_eq!(i32::from(ExitCode::ParseError), 3);
+        assert_eq!(i32::from(ExitCode::Timeout), 4);
+    }
+
+    // -------------------------------------------------------------------------
+    // Display implementation tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn auth_expired_display() {
+        let err = CautError::AuthExpired {
+            provider: "claude".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("authentication expired"));
+        assert!(display.contains("claude"));
+    }
+
+    #[test]
+    fn auth_not_configured_display() {
+        let err = CautError::AuthNotConfigured {
+            provider: "codex".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("authentication not configured"));
+        assert!(display.contains("codex"));
+    }
+
+    #[test]
+    fn auth_invalid_display() {
+        let err = CautError::AuthInvalid {
+            provider: "gemini".to_string(),
+            reason: "token malformed".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("invalid credentials"));
+        assert!(display.contains("gemini"));
+        assert!(display.contains("token malformed"));
+    }
+
+    #[test]
+    fn timeout_with_provider_display() {
+        let err = CautError::TimeoutWithProvider {
+            provider: "cursor".to_string(),
+            seconds: 45,
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("timeout"));
+        assert!(display.contains("45s"));
+        assert!(display.contains("cursor"));
+    }
+
+    #[test]
+    fn dns_failure_display() {
+        let err = CautError::DnsFailure {
+            host: "api.anthropic.com".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("DNS"));
+        assert!(display.contains("api.anthropic.com"));
+    }
+
+    #[test]
+    fn ssl_error_display() {
+        let err = CautError::SslError {
+            message: "certificate expired".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("SSL/TLS"));
+        assert!(display.contains("certificate expired"));
+    }
+
+    #[test]
+    fn connection_refused_display() {
+        let err = CautError::ConnectionRefused {
+            host: "localhost:8080".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("connection refused"));
+        assert!(display.contains("localhost:8080"));
+    }
+
+    #[test]
+    fn config_not_found_display() {
+        let err = CautError::ConfigNotFound {
+            path: "/etc/caut/config.toml".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("config file not found"));
+        assert!(display.contains("/etc/caut/config.toml"));
+    }
+
+    #[test]
+    fn config_parse_display() {
+        let err = CautError::ConfigParse {
+            path: "config.toml".to_string(),
+            line: Some(42),
+            message: "unexpected token".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("config parse error"));
+        assert!(display.contains("config.toml"));
+        assert!(display.contains("unexpected token"));
+    }
+
+    #[test]
+    fn config_invalid_display() {
+        let err = CautError::ConfigInvalid {
+            key: "timeout".to_string(),
+            value: "abc".to_string(),
+            message: "must be a number".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("invalid config value"));
+        assert!(display.contains("timeout"));
+        assert!(display.contains("must be a number"));
+    }
+
+    #[test]
+    fn rate_limited_display() {
+        let err = CautError::RateLimited {
+            provider: "claude".to_string(),
+            retry_after: Some(Duration::from_secs(120)),
+            message: "too many requests".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("rate limited"));
+        assert!(display.contains("claude"));
+        assert!(display.contains("too many requests"));
+    }
+
+    #[test]
+    fn provider_unavailable_display() {
+        let err = CautError::ProviderUnavailable {
+            provider: "codex".to_string(),
+            message: "service down".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("unavailable"));
+        assert!(display.contains("codex"));
+        assert!(display.contains("service down"));
+    }
+
+    #[test]
+    fn provider_api_error_display() {
+        let err = CautError::ProviderApiError {
+            provider: "gemini".to_string(),
+            status_code: Some(500),
+            message: "internal server error".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("API error"));
+        assert!(display.contains("gemini"));
+        assert!(display.contains("internal server error"));
+    }
+
+    #[test]
+    fn cli_not_found_display() {
+        let err = CautError::CliNotFound {
+            name: "claude".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("CLI tool not found"));
+        assert!(display.contains("claude"));
+    }
+
+    #[test]
+    fn permission_denied_display() {
+        let err = CautError::PermissionDenied {
+            path: "/etc/secret".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("permission denied"));
+        assert!(display.contains("/etc/secret"));
+    }
+
+    #[test]
+    fn env_var_missing_display() {
+        let err = CautError::EnvVarMissing {
+            name: "ANTHROPIC_API_KEY".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("environment variable not set"));
+        assert!(display.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn unsupported_source_display() {
+        let err = CautError::UnsupportedSource {
+            provider: "claude".to_string(),
+            source_type: "ftp".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("unsupported source"));
+        assert!(display.contains("claude"));
+        assert!(display.contains("ftp"));
+    }
+
+    #[test]
+    fn partial_failure_display() {
+        let err = CautError::PartialFailure { failed: 3 };
+        let display = format!("{}", err);
+        assert!(display.contains("partial failure"));
+        assert!(display.contains("3"));
+    }
+
+    #[test]
+    fn parse_response_display() {
+        let err = CautError::ParseResponse("unexpected JSON".to_string());
+        let display = format!("{}", err);
+        assert!(display.contains("failed to parse response"));
+        assert!(display.contains("unexpected JSON"));
+    }
+
+    #[test]
+    fn missing_rate_limit_display() {
+        let err = CautError::MissingRateLimit;
+        let display = format!("{}", err);
+        assert!(display.contains("missing rate limit data"));
+    }
+
+    #[test]
+    fn account_errors_display() {
+        let err = CautError::AccountRequiresSingleProvider;
+        assert!(format!("{}", err).contains("single provider"));
+
+        let err = CautError::AllAccountsConflict;
+        assert!(format!("{}", err).contains("--all-accounts"));
+
+        let err = CautError::ProviderNoTokenAccounts("codex".to_string());
+        assert!(format!("{}", err).contains("token accounts"));
+
+        let err = CautError::AccountNotFound("work".to_string());
+        assert!(format!("{}", err).contains("account not found"));
+
+        let err = CautError::NoAccountsConfigured("claude".to_string());
+        assert!(format!("{}", err).contains("no accounts configured"));
+    }
+
+    // -------------------------------------------------------------------------
+    // From trait conversion tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let caut_err: CautError = io_err.into();
+
+        assert!(matches!(caut_err, CautError::Io(_)));
+        assert_eq!(caut_err.category(), ErrorCategory::Internal);
+        assert_eq!(caut_err.error_code(), "CAUT-X001");
+        assert!(!caut_err.is_retryable());
+    }
+
+    #[test]
+    fn from_json_error() {
+        let json_err = serde_json::from_str::<serde_json::Value>("not json at all").unwrap_err();
+        let caut_err: CautError = json_err.into();
+
+        assert!(matches!(caut_err, CautError::Json(_)));
+        assert_eq!(caut_err.category(), ErrorCategory::Internal);
+        assert_eq!(caut_err.error_code(), "CAUT-X002");
+    }
+
+    #[test]
+    fn from_anyhow_error() {
+        let anyhow_err = anyhow::anyhow!("something unexpected happened");
+        let caut_err: CautError = anyhow_err.into();
+
+        assert!(matches!(caut_err, CautError::Other(_)));
+        assert_eq!(caut_err.category(), ErrorCategory::Internal);
+        assert_eq!(caut_err.error_code(), "CAUT-X099");
+    }
+
+    // -------------------------------------------------------------------------
+    // Additional category tests for completeness
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn ssl_error_has_correct_category() {
+        let err = CautError::SslError {
+            message: "cert error".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Network);
+        assert_eq!(err.error_code(), "CAUT-N004");
+    }
+
+    #[test]
+    fn connection_refused_has_correct_category() {
+        let err = CautError::ConnectionRefused {
+            host: "localhost".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Network);
+        assert_eq!(err.error_code(), "CAUT-N005");
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn config_parse_has_correct_category() {
+        let err = CautError::ConfigParse {
+            path: "test.toml".to_string(),
+            line: Some(5),
+            message: "syntax error".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Configuration);
+        assert_eq!(err.error_code(), "CAUT-C002");
+        assert_eq!(err.exit_code(), ExitCode::ParseError);
+    }
+
+    #[test]
+    fn config_invalid_has_correct_category() {
+        let err = CautError::ConfigInvalid {
+            key: "key".to_string(),
+            value: "val".to_string(),
+            message: "msg".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Configuration);
+        assert_eq!(err.error_code(), "CAUT-C003");
+    }
+
+    #[test]
+    fn provider_api_error_has_correct_category() {
+        let err = CautError::ProviderApiError {
+            provider: "test".to_string(),
+            status_code: Some(503),
+            message: "error".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Provider);
+        assert_eq!(err.error_code(), "CAUT-P003");
+        assert!(!err.is_retryable()); // API errors are not retryable by default
+    }
+
+    #[test]
+    fn unsupported_source_has_correct_category() {
+        let err = CautError::UnsupportedSource {
+            provider: "test".to_string(),
+            source_type: "unknown".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Configuration);
+        assert_eq!(err.error_code(), "CAUT-C011");
+    }
+
+    #[test]
+    fn partial_failure_has_correct_category() {
+        let err = CautError::PartialFailure { failed: 2 };
+        assert_eq!(err.category(), ErrorCategory::Provider);
+        assert_eq!(err.error_code(), "CAUT-P030");
+    }
+
+    #[test]
+    fn parse_response_has_correct_category() {
+        let err = CautError::ParseResponse("error".to_string());
+        assert_eq!(err.category(), ErrorCategory::Provider);
+        assert_eq!(err.error_code(), "CAUT-P020");
+    }
+
+    #[test]
+    fn missing_rate_limit_has_correct_category() {
+        let err = CautError::MissingRateLimit;
+        assert_eq!(err.category(), ErrorCategory::Provider);
+        assert_eq!(err.error_code(), "CAUT-P021");
+    }
+
+    #[test]
+    fn env_var_missing_has_correct_category() {
+        let err = CautError::EnvVarMissing {
+            name: "TEST".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Environment);
+        assert_eq!(err.error_code(), "CAUT-E004");
+    }
+
+    // -------------------------------------------------------------------------
+    // Provider extraction tests for all provider-related variants
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn provider_extraction_all_variants() {
+        // All these should return the provider
+        assert_eq!(
+            CautError::AuthNotConfigured {
+                provider: "p1".to_string(),
+            }
+            .provider(),
+            Some("p1")
+        );
+        assert_eq!(
+            CautError::AuthInvalid {
+                provider: "p2".to_string(),
+                reason: "r".to_string(),
+            }
+            .provider(),
+            Some("p2")
+        );
+        assert_eq!(
+            CautError::TimeoutWithProvider {
+                provider: "p3".to_string(),
+                seconds: 1,
+            }
+            .provider(),
+            Some("p3")
+        );
+        assert_eq!(
+            CautError::RateLimited {
+                provider: "p4".to_string(),
+                retry_after: None,
+                message: "m".to_string(),
+            }
+            .provider(),
+            Some("p4")
+        );
+        assert_eq!(
+            CautError::ProviderUnavailable {
+                provider: "p5".to_string(),
+                message: "m".to_string(),
+            }
+            .provider(),
+            Some("p5")
+        );
+        assert_eq!(
+            CautError::ProviderApiError {
+                provider: "p6".to_string(),
+                status_code: None,
+                message: "m".to_string(),
+            }
+            .provider(),
+            Some("p6")
+        );
+        assert_eq!(
+            CautError::UnsupportedSource {
+                provider: "p7".to_string(),
+                source_type: "s".to_string(),
+            }
+            .provider(),
+            Some("p7")
+        );
+        assert_eq!(
+            CautError::ProviderNoTokenAccounts("p8".to_string()).provider(),
+            Some("p8")
+        );
+        assert_eq!(
+            CautError::NoAccountsConfigured("p9".to_string()).provider(),
+            Some("p9")
+        );
+    }
+
+    #[test]
+    fn provider_returns_none_for_all_non_provider_errors() {
+        assert!(CautError::Config("test".to_string()).provider().is_none());
+        assert!(
+            CautError::ConfigNotFound {
+                path: "p".to_string()
+            }
+            .provider()
+            .is_none()
+        );
+        assert!(
+            CautError::ConfigParse {
+                path: "p".to_string(),
+                line: None,
+                message: "m".to_string(),
+            }
+            .provider()
+            .is_none()
+        );
+        assert!(
+            CautError::DnsFailure {
+                host: "h".to_string()
+            }
+            .provider()
+            .is_none()
+        );
+        assert!(
+            CautError::SslError {
+                message: "m".to_string()
+            }
+            .provider()
+            .is_none()
+        );
+        assert!(
+            CautError::ConnectionRefused {
+                host: "h".to_string()
+            }
+            .provider()
+            .is_none()
+        );
+        assert!(
+            CautError::PermissionDenied {
+                path: "p".to_string()
+            }
+            .provider()
+            .is_none()
+        );
+        assert!(CautError::AccountRequiresSingleProvider.provider().is_none());
+        assert!(CautError::AllAccountsConflict.provider().is_none());
+        assert!(CautError::MissingRateLimit.provider().is_none());
+        assert!(CautError::PartialFailure { failed: 1 }.provider().is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Comprehensive retryable tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn dns_failure_is_retryable() {
+        let err = CautError::DnsFailure {
+            host: "test.com".to_string(),
+        };
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn all_retryable_errors() {
+        // Comprehensive test of all retryable error types
+        let retryable_errors: Vec<CautError> = vec![
+            CautError::Timeout(30),
+            CautError::TimeoutWithProvider {
+                provider: "test".to_string(),
+                seconds: 30,
+            },
+            CautError::Network("error".to_string()),
+            CautError::ConnectionRefused {
+                host: "test".to_string(),
+            },
+            CautError::DnsFailure {
+                host: "test".to_string(),
+            },
+            CautError::RateLimited {
+                provider: "test".to_string(),
+                retry_after: None,
+                message: "test".to_string(),
+            },
+            CautError::ProviderUnavailable {
+                provider: "test".to_string(),
+                message: "test".to_string(),
+            },
+        ];
+
+        for err in retryable_errors {
+            assert!(err.is_retryable(), "Error {:?} should be retryable", err);
+        }
+    }
+
+    #[test]
+    fn all_non_retryable_errors() {
+        // Comprehensive test of all non-retryable error types
+        let non_retryable_errors: Vec<CautError> = vec![
+            CautError::AuthExpired {
+                provider: "test".to_string(),
+            },
+            CautError::AuthNotConfigured {
+                provider: "test".to_string(),
+            },
+            CautError::AuthInvalid {
+                provider: "test".to_string(),
+                reason: "test".to_string(),
+            },
+            CautError::SslError {
+                message: "test".to_string(),
+            },
+            CautError::Config("test".to_string()),
+            CautError::ConfigNotFound {
+                path: "test".to_string(),
+            },
+            CautError::ConfigParse {
+                path: "test".to_string(),
+                line: None,
+                message: "test".to_string(),
+            },
+            CautError::ConfigInvalid {
+                key: "test".to_string(),
+                value: "test".to_string(),
+                message: "test".to_string(),
+            },
+            CautError::InvalidProvider("test".to_string()),
+            CautError::ProviderApiError {
+                provider: "test".to_string(),
+                status_code: None,
+                message: "test".to_string(),
+            },
+            CautError::CliNotFound {
+                name: "test".to_string(),
+            },
+            CautError::ProviderNotFound("test".to_string()),
+            CautError::PermissionDenied {
+                path: "test".to_string(),
+            },
+            CautError::EnvVarMissing {
+                name: "test".to_string(),
+            },
+            CautError::UnsupportedSource {
+                provider: "test".to_string(),
+                source_type: "test".to_string(),
+            },
+            CautError::AccountRequiresSingleProvider,
+            CautError::AllAccountsConflict,
+            CautError::ProviderNoTokenAccounts("test".to_string()),
+            CautError::AccountNotFound("test".to_string()),
+            CautError::NoAccountsConfigured("test".to_string()),
+            CautError::FetchFailed {
+                provider: "test".to_string(),
+                reason: "test".to_string(),
+            },
+            CautError::NoAvailableStrategy("test".to_string()),
+            CautError::ParseResponse("test".to_string()),
+            CautError::MissingRateLimit,
+            CautError::PartialFailure { failed: 1 },
+        ];
+
+        for err in non_retryable_errors {
+            assert!(
+                !err.is_retryable(),
+                "Error {:?} should NOT be retryable",
+                err
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Error code category prefix verification
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn error_codes_match_category_prefix() {
+        let error_category_pairs: Vec<(CautError, &str)> = vec![
+            (
+                CautError::AuthExpired {
+                    provider: "".to_string(),
+                },
+                "A",
+            ),
+            (CautError::Timeout(0), "N"),
+            (CautError::Config("".to_string()), "C"),
+            (
+                CautError::RateLimited {
+                    provider: "".to_string(),
+                    retry_after: None,
+                    message: "".to_string(),
+                },
+                "P",
+            ),
+            (
+                CautError::CliNotFound {
+                    name: "".to_string(),
+                },
+                "E",
+            ),
+            (CautError::Other(anyhow::anyhow!("")), "X"),
+        ];
+
+        for (err, expected_prefix) in error_category_pairs {
+            let code = err.error_code();
+            let actual_prefix = &code[5..6]; // "CAUT-X001" -> "X"
+            assert_eq!(
+                actual_prefix,
+                expected_prefix,
+                "Error code {} should have prefix {}",
+                code,
+                expected_prefix
+            );
+            assert_eq!(
+                err.category().code_prefix(),
+                expected_prefix,
+                "Category prefix mismatch for {:?}",
+                err
+            );
+        }
+    }
 }

@@ -162,6 +162,35 @@ impl Provider {
         }
     }
 
+    /// Default priority for provider ordering (lower = higher priority).
+    ///
+    /// Used when no explicit priority is configured in the config file.
+    /// Primary providers (Claude, Codex) have highest priority.
+    #[must_use]
+    pub const fn default_priority(self) -> i32 {
+        match self {
+            // Primary providers - highest priority
+            Self::Claude => 1,
+            Self::Codex => 2,
+            // Popular secondary providers
+            Self::Gemini => 3,
+            Self::Cursor => 4,
+            Self::Copilot => 5,
+            // Other providers
+            Self::VertexAI => 6,
+            Self::Kiro => 7,
+            Self::JetBrainsAI => 8,
+            Self::Amp => 9,
+            Self::Zai => 10,
+            Self::MiniMax => 11,
+            Self::Kimi => 12,
+            Self::KimiK2 => 13,
+            Self::Antigravity => 14,
+            Self::OpenCode => 15,
+            Self::Factory => 16,
+        }
+    }
+
     /// Get the status page URL for this provider.
     #[must_use]
     pub const fn status_page_url(self) -> Option<&'static str> {

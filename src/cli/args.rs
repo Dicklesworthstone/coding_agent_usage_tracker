@@ -69,6 +69,9 @@ pub enum Commands {
     /// Show local cost usage
     Cost(CostArgs),
 
+    /// Show session cost attribution
+    Session(SessionArgs),
+
     /// Manage usage history and retention
     #[command(subcommand)]
     History(HistoryCommand),
@@ -82,6 +85,9 @@ pub enum Commands {
 
     /// Output usage for shell prompt integration (fast, cached)
     Prompt(PromptArgs),
+
+    /// Launch interactive TUI dashboard
+    Dashboard(DashboardArgs),
 }
 
 /// History subcommands.
@@ -93,6 +99,8 @@ pub enum HistoryCommand {
     Prune(HistoryPruneArgs),
     /// Show history database statistics
     Stats,
+    /// Export history data to JSON or CSV
+    Export(HistoryExportArgs),
 }
 
 /// Arguments for `history show`.
@@ -131,8 +139,65 @@ pub struct HistoryPruneArgs {
     pub max_size_mb: Option<u64>,
 }
 
-/// Arguments for the `usage` command.
+/// Arguments for `history export`.
 #[derive(Parser, Debug)]
+pub struct HistoryExportArgs {
+    /// Export format (json or csv)
+    #[arg(short, long, value_name = "FORMAT", default_value = "json")]
+    pub format: ExportFormat,
+
+    /// Output file path (defaults to stdout)
+    #[arg(short, long, value_name = "PATH")]
+    pub output: Option<std::path::PathBuf>,
+
+    /// Start date (RFC3339 or YYYY-MM-DD)
+    #[arg(long, value_name = "DATE")]
+    pub since: Option<String>,
+
+    /// End date (RFC3339 or YYYY-MM-DD)
+    #[arg(long, value_name = "DATE")]
+    pub until: Option<String>,
+
+    /// Filter by provider
+    #[arg(short, long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// Maximum number of rows to export
+    #[arg(short, long, value_name = "N")]
+    pub limit: Option<usize>,
+}
+
+/// Export format for history data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExportFormat {
+    #[default]
+    Json,
+    Csv,
+}
+
+impl std::str::FromStr for ExportFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "json" => Ok(Self::Json),
+            "csv" => Ok(Self::Csv),
+            _ => Err(format!("Unknown export format: {s}. Use 'json' or 'csv'.")),
+        }
+    }
+}
+
+impl std::fmt::Display for ExportFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Json => write!(f, "json"),
+            Self::Csv => write!(f, "csv"),
+        }
+    }
+}
+
+/// Arguments for the `usage` command.
+#[derive(Parser, Debug, Clone)]
 pub struct UsageArgs {
     /// Provider to query (name, "both", or "all")
     #[arg(long, value_name = "PROVIDER")]
@@ -185,6 +250,11 @@ pub struct UsageArgs {
     /// Interval between updates in seconds (default: 30).
     #[arg(long, default_value = "30")]
     pub interval: u64,
+
+    /// Use TUI dashboard mode (interactive terminal UI with ratatui).
+    /// Implies --watch mode.
+    #[arg(long, short = 't')]
+    pub tui: bool,
 }
 
 impl UsageArgs {
@@ -298,6 +368,69 @@ pub struct PromptArgs {
     pub install: Option<ShellType>,
 }
 
+/// Arguments for the `dashboard` command.
+#[derive(Parser, Debug)]
+pub struct DashboardArgs {
+    /// Provider to query (name, "both", or "all")
+    #[arg(long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// Data source (auto, web, cli, oauth)
+    #[arg(long, value_name = "SOURCE")]
+    pub source: Option<String>,
+
+    /// Interval between updates in seconds (default: 30)
+    #[arg(long, default_value = "30")]
+    pub interval: u64,
+}
+
+/// Arguments for the `session` command.
+#[derive(Parser, Debug, Clone, Default)]
+pub struct SessionArgs {
+    /// Show specific session by ID (partial match supported)
+    #[arg(long, value_name = "ID")]
+    pub id: Option<String>,
+
+    /// List recent sessions
+    #[arg(long, short = 'l')]
+    pub list: bool,
+
+    /// Show all sessions from today
+    #[arg(long)]
+    pub today: bool,
+
+    /// Filter by provider (claude, codex)
+    #[arg(long, short = 'p', value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// Maximum number of sessions to show in list mode (default: 10)
+    #[arg(long, short = 'n', value_name = "N", default_value = "10")]
+    pub limit: usize,
+}
+
+impl DashboardArgs {
+    /// Convert to UsageArgs for the TUI runner.
+    #[must_use]
+    pub fn to_usage_args(&self) -> UsageArgs {
+        UsageArgs {
+            provider: self.provider.clone(),
+            account: None,
+            account_index: None,
+            all_accounts: false,
+            no_credits: false,
+            status: true, // Always show status in dashboard
+            source: self.source.clone(),
+            web: false,
+            timeout: None,
+            web_timeout: None,
+            web_debug_dump_html: false,
+            watch: true,
+            interval: self.interval,
+            tui: true,
+        }
+    }
+}
+
 /// Prompt output format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum PromptFormat {
@@ -383,6 +516,7 @@ mod tests {
             web_debug_dump_html: false,
             watch: false,
             interval: 30,
+            tui: false,
         };
         assert!(args.validate().is_err());
     }

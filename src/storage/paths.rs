@@ -102,3 +102,161 @@ mod dirs {
         directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::AppPaths;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+
+    use crate::test_utils::TestDir;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> &'static Mutex<()> {
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[allow(unsafe_code)]
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+    }
+
+    impl EnvGuard {
+        #[allow(unsafe_code)]
+        fn set(key: &'static str, value: &PathBuf) -> Self {
+            let prior = std::env::var(key).ok();
+            // SAFETY: Tests guard env mutation with a global mutex.
+            unsafe { std::env::set_var(key, value) };
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        #[allow(unsafe_code)]
+        fn drop(&mut self) {
+            match &self.prior {
+                Some(value) => {
+                    // SAFETY: Tests guard env mutation with a global mutex.
+                    unsafe { std::env::set_var(self.key, value) };
+                }
+                None => {
+                    // SAFETY: Tests guard env mutation with a global mutex.
+                    unsafe { std::env::remove_var(self.key) };
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn token_accounts_file_is_under_config_dir() {
+        let paths = AppPaths::new();
+        let token_path = paths.token_accounts_file();
+        assert!(
+            token_path.ends_with("token-accounts.json"),
+            "token accounts path should end with token-accounts.json"
+        );
+        assert_eq!(
+            token_path.parent(),
+            Some(paths.config.as_path()),
+            "token accounts file should live under config dir"
+        );
+    }
+
+    #[test]
+    fn cache_and_data_paths_are_rooted_in_expected_dirs() {
+        let paths = AppPaths::new();
+
+        let dashboard = paths.openai_dashboard_cache();
+        assert!(dashboard.starts_with(&paths.cache));
+        assert!(dashboard.ends_with("openai-dashboard.json"));
+
+        let cost_cache = paths.cost_usage_cache("codex");
+        assert!(cost_cache.starts_with(&paths.cache));
+        let cost_suffix = PathBuf::from("cost-usage").join("codex-v1.json");
+        assert!(cost_cache.ends_with(cost_suffix));
+
+        let history_db = paths.history_db_file();
+        assert!(history_db.starts_with(&paths.data));
+        assert!(history_db.ends_with("usage-history.sqlite"));
+
+        let prompt_cache = paths.prompt_cache_file();
+        assert!(prompt_cache.starts_with(&paths.cache));
+        assert!(prompt_cache.ends_with("prompt-cache.json"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn codexbar_token_accounts_path_is_mac_only() {
+        let path = AppPaths::codexbar_token_accounts_file();
+        assert!(
+            path.is_some(),
+            "expected CodexBar token accounts path on macOS"
+        );
+        let path = path.unwrap();
+        assert!(
+            path.ends_with("Library/Application Support/CodexBar/token-accounts.json"),
+            "unexpected CodexBar token accounts path: {}",
+            path.display()
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn codexbar_token_accounts_path_is_none_off_macos() {
+        assert!(AppPaths::codexbar_token_accounts_file().is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn app_paths_respect_xdg_overrides() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let dir = TestDir::new();
+
+        let config_home = dir.path().join("xdg-config");
+        let cache_home = dir.path().join("xdg-cache");
+        let data_home = dir.path().join("xdg-data");
+        std::fs::create_dir_all(&config_home).expect("config dir");
+        std::fs::create_dir_all(&cache_home).expect("cache dir");
+        std::fs::create_dir_all(&data_home).expect("data dir");
+
+        let _guard_config = EnvGuard::set("XDG_CONFIG_HOME", &config_home);
+        let _guard_cache = EnvGuard::set("XDG_CACHE_HOME", &cache_home);
+        let _guard_data = EnvGuard::set("XDG_DATA_HOME", &data_home);
+
+        let paths = AppPaths::new();
+        assert_eq!(paths.config, config_home.join("caut"));
+        assert_eq!(paths.cache, cache_home.join("caut"));
+        assert_eq!(paths.data, data_home.join("caut"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ensure_dirs_creates_expected_tree() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let dir = TestDir::new();
+
+        let config_home = dir.path().join("xdg-config");
+        let cache_home = dir.path().join("xdg-cache");
+        let data_home = dir.path().join("xdg-data");
+        std::fs::create_dir_all(&config_home).expect("config dir");
+        std::fs::create_dir_all(&cache_home).expect("cache dir");
+        std::fs::create_dir_all(&data_home).expect("data dir");
+
+        let _guard_config = EnvGuard::set("XDG_CONFIG_HOME", &config_home);
+        let _guard_cache = EnvGuard::set("XDG_CACHE_HOME", &cache_home);
+        let _guard_data = EnvGuard::set("XDG_DATA_HOME", &data_home);
+
+        let paths = AppPaths::new();
+        paths.ensure_dirs().expect("ensure dirs");
+
+        assert!(paths.config.exists(), "config dir should exist");
+        assert!(paths.cache.exists(), "cache dir should exist");
+        assert!(paths.data.exists(), "data dir should exist");
+        assert!(
+            paths.cache.join("cost-usage").exists(),
+            "cost-usage cache dir should exist"
+        );
+    }
+}

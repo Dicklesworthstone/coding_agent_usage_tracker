@@ -7,6 +7,7 @@ pub mod history_schema;
 pub mod paths;
 pub mod token_accounts;
 
+pub use cache::{CacheSource, CacheStaleness, OfflineCache, OfflineCacheConfig, OfflineCacheEntry};
 pub use config::{
     Config, ConfigSource, ConfigSources, ENV_CONFIG, ENV_FORMAT, ENV_NO_COLOR, ENV_NO_COLOR_STD,
     ENV_PRETTY, ENV_PROVIDERS, ENV_TIMEOUT, ENV_VERBOSE, ResolvedConfig,

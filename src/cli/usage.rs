@@ -37,6 +37,17 @@ pub async fn execute(
         }
     }
 
+    // TUI mode implies watch mode
+    if args.tui {
+        let interval = args.interval;
+        if interval == 0 {
+            return Err(CautError::Config(
+                "Watch interval must be greater than 0 seconds".to_string(),
+            ));
+        }
+        return crate::tui::run_dashboard(args, interval).await;
+    }
+
     if args.watch {
         let interval = Duration::from_secs(args.interval);
         if interval.is_zero() {

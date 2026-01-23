@@ -437,20 +437,37 @@ pub struct GeneralConfig {
 pub struct ProvidersConfig {
     /// Default providers to query when none specified.
     pub default_providers: Vec<String>,
-    /// Claude-specific settings.
-    pub claude: ProviderSettings,
-    /// Codex-specific settings.
-    pub codex: ProviderSettings,
+    /// Per-provider settings (keyed by provider CLI name like "claude", "codex", "gemini").
+    #[serde(flatten)]
+    pub settings: std::collections::HashMap<String, ProviderSettings>,
 }
 
 /// Settings for a specific provider.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProviderSettings {
     /// Whether this provider is enabled.
     pub enabled: bool,
+    /// Priority for ordering (lower = higher priority). If not set, uses provider default.
+    pub priority: Option<i32>,
+    /// Override timeout for this provider specifically (in seconds).
+    pub timeout_seconds: Option<u64>,
+    /// Override default strategies to try (e.g., ["oauth", "cli-pty"]).
+    pub strategies: Option<Vec<String>>,
     /// Custom API base URL (if different from default).
     pub api_base: Option<String>,
+}
+
+impl Default for ProviderSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            priority: None,
+            timeout_seconds: None,
+            strategies: None,
+            api_base: None,
+        }
+    }
 }
 
 /// Output formatting configuration.
@@ -487,17 +504,37 @@ impl Default for GeneralConfig {
 
 impl Default for ProvidersConfig {
     fn default() -> Self {
+        let mut settings = std::collections::HashMap::new();
+        settings.insert("claude".to_string(), ProviderSettings::default());
+        settings.insert("codex".to_string(), ProviderSettings::default());
         Self {
             default_providers: vec!["claude".to_string(), "codex".to_string()],
-            claude: ProviderSettings {
-                enabled: true,
-                api_base: None,
-            },
-            codex: ProviderSettings {
-                enabled: true,
-                api_base: None,
-            },
+            settings,
         }
+    }
+}
+
+impl ProvidersConfig {
+    /// Get settings for a specific provider.
+    ///
+    /// Returns the configured settings if present, otherwise returns default settings.
+    #[must_use]
+    pub fn get_settings(&self, provider_name: &str) -> ProviderSettings {
+        self.settings
+            .get(provider_name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Check if a provider is enabled.
+    ///
+    /// A provider is enabled if it has no explicit settings (default enabled)
+    /// or if its settings have `enabled: true`.
+    #[must_use]
+    pub fn is_enabled(&self, provider_name: &str) -> bool {
+        self.settings
+            .get(provider_name)
+            .map_or(true, |s| s.enabled)
     }
 }
 
@@ -609,8 +646,88 @@ impl Config {
             ));
         }
 
+        // Validate provider names in settings
+        for name in self.providers.settings.keys() {
+            Provider::from_cli_name(name).map_err(|_| {
+                CautError::Config(format!(
+                    "Invalid provider \"{name}\" in [providers.{name}]. Valid providers: {valid_providers}",
+                ))
+            })?;
+        }
+
+        // Validate per-provider timeout bounds
+        for (name, settings) in &self.providers.settings {
+            if let Some(timeout) = settings.timeout_seconds {
+                if timeout == 0 || timeout > 300 {
+                    return Err(CautError::Config(format!(
+                        "Provider \"{name}\" timeout must be between 1 and 300 seconds, got {}",
+                        timeout
+                    )));
+                }
+            }
+        }
+
         Ok(())
     }
+
+    /// Get effective settings for a provider.
+    ///
+    /// Combines configuration file settings with provider defaults.
+    /// Returns a resolved set of settings where:
+    /// - `enabled` defaults to true
+    /// - `priority` defaults to provider's `default_priority()`
+    /// - `timeout_seconds` defaults to provider's `default_timeout()`
+    /// - `strategies` defaults to None (use all available)
+    /// - `api_base` defaults to None
+    #[must_use]
+    pub fn effective_provider_settings(
+        &self,
+        provider: crate::core::provider::Provider,
+    ) -> EffectiveProviderSettings {
+        let settings = self.providers.get_settings(provider.cli_name());
+        EffectiveProviderSettings {
+            enabled: settings.enabled,
+            priority: settings.priority.unwrap_or_else(|| provider.default_priority()),
+            timeout: std::time::Duration::from_secs(
+                settings
+                    .timeout_seconds
+                    .unwrap_or(provider.default_timeout().as_secs()),
+            ),
+            strategies: settings.strategies.clone(),
+            api_base: settings.api_base.clone(),
+        }
+    }
+
+    /// Get enabled providers sorted by priority.
+    ///
+    /// Returns providers that are enabled (either explicitly or by default),
+    /// sorted by their effective priority (lower priority number = higher precedence).
+    #[must_use]
+    pub fn enabled_providers_sorted(&self) -> Vec<crate::core::provider::Provider> {
+        let mut providers: Vec<_> = crate::core::provider::Provider::ALL
+            .iter()
+            .filter(|p| self.providers.is_enabled(p.cli_name()))
+            .copied()
+            .collect();
+
+        providers.sort_by_key(|p| self.effective_provider_settings(*p).priority);
+        providers
+    }
+}
+
+/// Effective settings for a provider after merging config with defaults.
+#[derive(Debug, Clone)]
+pub struct EffectiveProviderSettings {
+    /// Whether this provider is enabled.
+    pub enabled: bool,
+    /// Effective priority (lower = higher precedence).
+    pub priority: i32,
+    /// Effective timeout for fetch operations.
+    pub timeout: std::time::Duration,
+    /// Strategies to try (None = all available).
+    pub strategies: Option<Vec<String>>,
+    /// Custom API base URL.
+    pub api_base: Option<String>,
 }
 
 #[cfg(test)]
@@ -793,6 +910,7 @@ pretty = true
             web_debug_dump_html: false,
             watch: false,
             interval: 30,
+            tui: false,
         }
     }
 
@@ -1190,10 +1308,12 @@ pretty = true
     fn per_provider_default_settings() {
         let config = Config::default();
 
-        assert!(config.providers.claude.enabled);
-        assert!(config.providers.codex.enabled);
-        assert!(config.providers.claude.api_base.is_none());
-        assert!(config.providers.codex.api_base.is_none());
+        let claude_settings = config.providers.get_settings("claude");
+        let codex_settings = config.providers.get_settings("codex");
+        assert!(claude_settings.enabled);
+        assert!(codex_settings.enabled);
+        assert!(claude_settings.api_base.is_none());
+        assert!(codex_settings.api_base.is_none());
     }
 
     #[test]
@@ -1215,14 +1335,16 @@ api_base = "https://custom-codex.example.com"
 
         let config = Config::load_from(file.path()).unwrap();
 
-        assert!(!config.providers.claude.enabled);
+        let claude_settings = config.providers.get_settings("claude");
+        let codex_settings = config.providers.get_settings("codex");
+        assert!(!claude_settings.enabled);
         assert_eq!(
-            config.providers.claude.api_base,
+            claude_settings.api_base,
             Some("https://custom-claude.example.com".to_string())
         );
-        assert!(config.providers.codex.enabled);
+        assert!(codex_settings.enabled);
         assert_eq!(
-            config.providers.codex.api_base,
+            codex_settings.api_base,
             Some("https://custom-codex.example.com".to_string())
         );
     }
@@ -1325,8 +1447,8 @@ pretty = false
 
         // Providers section
         assert_eq!(config.providers.default_providers, vec!["claude", "codex"]);
-        assert!(config.providers.claude.enabled);
-        assert!(!config.providers.codex.enabled);
+        assert!(config.providers.get_settings("claude").enabled);
+        assert!(!config.providers.get_settings("codex").enabled);
 
         // Output section
         assert_eq!(config.output.format, Some("md".to_string()));
@@ -1386,7 +1508,7 @@ timeout_seconds = 45
         assert!(!config.general.include_status); // default is false
         assert!(config.output.color); // default is true
         assert!(!config.output.pretty); // default is false
-        assert!(config.providers.claude.enabled); // default is true
+        assert!(config.providers.get_settings("claude").enabled); // default is true
     }
 
     // -------------------------------------------------------------------------
@@ -1505,11 +1627,11 @@ pretty = true
             "Default providers should be claude and codex"
         );
         assert!(
-            config.providers.claude.enabled,
+            config.providers.get_settings("claude").enabled,
             "Claude should be enabled by default"
         );
         assert!(
-            config.providers.codex.enabled,
+            config.providers.get_settings("codex").enabled,
             "Codex should be enabled by default"
         );
     }

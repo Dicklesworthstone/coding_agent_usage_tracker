@@ -15,6 +15,7 @@ pub mod providers;
 pub mod render;
 pub mod rich;
 pub mod storage;
+pub mod tui;
 pub mod util;
 
 /// Test utilities module - included in test builds or when test-utils feature is enabled.
