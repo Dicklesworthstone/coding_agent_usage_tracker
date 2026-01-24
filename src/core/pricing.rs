@@ -26,7 +26,7 @@ impl ModelPricing {
     /// Create a new pricing entry.
     #[must_use]
     pub const fn new(
-        model: &'static str,
+        _model: &'static str,
         input_per_million: f64,
         output_per_million: f64,
         cache_read_per_million: f64,

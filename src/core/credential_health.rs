@@ -755,6 +755,7 @@ impl ProviderAuthHealth {
 /// Aggregates authentication health across credential sources.
 #[derive(Debug, Default)]
 pub struct AuthHealthAggregator {
+    #[expect(dead_code)]
     jwt_checker: JwtHealthChecker,
 }
 
@@ -853,9 +854,9 @@ impl AuthHealthAggregator {
 #[must_use]
 pub fn get_reauth_instructions(provider: &Provider, source: &str) -> String {
     match (provider.cli_name(), source) {
-        ("claude", "oauth") | ("claude", _) => "Run: claude auth login".to_string(),
-        ("codex", "oauth") | ("codex", _) => "Run: codex auth login".to_string(),
-        ("gemini", "oauth") | ("gemini", _) => "Run: gemini auth login".to_string(),
+        ("claude", "oauth" | _) => "Run: claude auth login".to_string(),
+        ("codex", "oauth" | _) => "Run: codex auth login".to_string(),
+        ("gemini", "oauth" | _) => "Run: gemini auth login".to_string(),
         ("cursor", _) => "Open Cursor and sign in".to_string(),
         ("copilot", _) => "Sign in with your GitHub account".to_string(),
         ("vertexai", _) => "Run: gcloud auth application-default login".to_string(),

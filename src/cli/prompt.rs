@@ -114,6 +114,7 @@ pub fn execute(args: &PromptArgs) -> Result<()> {
 }
 
 /// Format prompt output according to the requested format.
+#[expect(dead_code)]
 fn format_prompt(
     providers: &[&ProviderPromptData],
     format: PromptFormat,
