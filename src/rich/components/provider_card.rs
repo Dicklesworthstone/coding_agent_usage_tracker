@@ -112,6 +112,7 @@ impl<'a> ProviderCard<'a> {
     }
 
     /// Render the card header as segments.
+    #[allow(dead_code)]
     fn render_header_segments(&self) -> Vec<Segment<'static>> {
         let provider_style = self.theme.provider_style(&self.provider_name()).clone();
 

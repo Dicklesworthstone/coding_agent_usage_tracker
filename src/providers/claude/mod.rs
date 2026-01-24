@@ -184,6 +184,7 @@ struct ClaudeRateLimit {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 struct ClaudeUsage {
     #[serde(default)]
     input_tokens: Option<i64>,
@@ -193,6 +194,7 @@ struct ClaudeUsage {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 struct ClaudeAccount {
     #[serde(default)]
     email: Option<String>,

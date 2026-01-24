@@ -77,6 +77,7 @@ fn get_codex_dir() -> Option<PathBuf> {
 
 /// Auth.json structure from ~/.codex/auth.json
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CodexAuthJson {
     #[serde(rename = "OPENAI_API_KEY")]
     #[serde(default)]
@@ -89,6 +90,7 @@ struct CodexAuthJson {
 
 /// OAuth tokens structure in auth.json
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CodexAuthTokens {
     #[serde(default)]
     id_token: Option<String>,
@@ -103,6 +105,7 @@ struct CodexAuthTokens {
 /// JWT claims from the id_token (decoded from base64).
 /// Contains OpenAI-specific auth information.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct JwtClaims {
     /// User email
     #[serde(default)]
@@ -117,6 +120,7 @@ struct JwtClaims {
 
 /// OpenAI-specific claims embedded in JWT.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenAiAuthClaims {
     /// ChatGPT account ID
     #[serde(default)]
@@ -125,7 +129,6 @@ struct OpenAiAuthClaims {
     #[serde(default)]
     chatgpt_plan_type: Option<String>,
     /// User ID
-    #[allow(dead_code)]
     #[serde(default)]
     chatgpt_user_id: Option<String>,
     /// Subscription active start date
@@ -144,6 +147,7 @@ struct OpenAiAuthClaims {
 
 /// Organization info from JWT claims.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenAiOrganization {
     #[serde(default)]
     id: Option<String>,
@@ -316,6 +320,7 @@ fn get_local_identity() -> Option<(ProviderIdentity, Option<SubscriptionInfo>)> 
 
 /// Subscription information extracted from JWT.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct SubscriptionInfo {
     plan_type: Option<String>,
     active_start: Option<String>,
@@ -361,6 +366,7 @@ struct CodexCredits {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct CodexUser {
     #[serde(default)]
     email: Option<String>,

@@ -205,7 +205,7 @@ fn format_status_segments(
     indicator: StatusIndicator,
     description: Option<&str>,
     no_color: bool,
-) -> Vec<Segment> {
+) -> Vec<Segment<'_>> {
     let mut segments = Vec::new();
 
     segments.push(Segment::styled("Status: ", Style::new().bold()));
