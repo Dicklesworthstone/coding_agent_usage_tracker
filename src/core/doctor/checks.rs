@@ -301,6 +301,7 @@ async fn check_gemini_auth() -> CheckStatus {
 }
 
 /// Check Cursor authentication.
+#[allow(clippy::unused_async)]
 async fn check_cursor_auth() -> CheckStatus {
     let home = match dirs::home_dir() {
         Some(h) => h,
@@ -327,6 +328,7 @@ async fn check_cursor_auth() -> CheckStatus {
 }
 
 /// Generic auth check for providers without specific implementation.
+#[allow(clippy::unused_async)]
 async fn check_generic_auth(provider: Provider) -> CheckStatus {
     // Check if there's a known credentials path
     if let Some(creds_path) = provider.credentials_path() {
