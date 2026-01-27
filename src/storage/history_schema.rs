@@ -18,6 +18,10 @@ const HISTORY_MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: include_str!("../../migrations/002_daily_aggregates.sql"),
     },
+    Migration {
+        version: 3,
+        sql: include_str!("../../migrations/003_multi_account.sql"),
+    },
 ];
 
 /// Default retention window for usage history.
@@ -143,7 +147,7 @@ mod tests {
         let mut conn = open_in_memory();
         let version = run_migrations(&mut conn).expect("run migrations");
 
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
 
         let table_exists: i32 = conn
             .query_row(
@@ -170,15 +174,15 @@ mod tests {
         let version_first = run_migrations(&mut conn).expect("first run");
         let version_second = run_migrations(&mut conn).expect("second run");
 
-        assert_eq!(version_first, 2);
-        assert_eq!(version_second, 2);
+        assert_eq!(version_first, 3);
+        assert_eq!(version_second, 3);
 
         let count: i32 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .expect("count migrations");
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
     }
 
     #[test]

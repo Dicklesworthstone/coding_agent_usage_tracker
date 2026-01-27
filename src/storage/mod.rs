@@ -4,6 +4,7 @@ pub mod cache;
 pub mod config;
 pub mod history;
 pub mod history_schema;
+pub mod multi_account;
 pub mod paths;
 pub mod token_accounts;
 
@@ -18,5 +19,8 @@ pub use history::{
     StoredSnapshot, UsageStats,
 };
 pub use history_schema::{DEFAULT_RETENTION_DAYS, cleanup_old_snapshots, run_migrations};
+pub use multi_account::{
+    Account, CircuitState, MultiAccountDb, ProviderHealth, SwitchLogEntry, SwitchTrigger,
+};
 pub use paths::AppPaths;
 pub use token_accounts::{TokenAccount, TokenAccountStore};
