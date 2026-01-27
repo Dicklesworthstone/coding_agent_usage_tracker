@@ -16,12 +16,14 @@ use caut::error::CautError;
 /// Build information embedded at compile time.
 mod build_info {
     /// Build timestamp.
+    #[expect(dead_code, reason = "reserved for future version display")]
     pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
     /// Git SHA.
     pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
     /// Whether the build is dirty.
     pub const GIT_DIRTY: &str = env!("VERGEN_GIT_DIRTY");
     /// Rustc version.
+    #[expect(dead_code, reason = "reserved for future version display")]
     pub const RUSTC_SEMVER: &str = env!("VERGEN_RUSTC_SEMVER");
 }
 

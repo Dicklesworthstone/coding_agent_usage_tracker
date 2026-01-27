@@ -7,6 +7,8 @@
 #![deny(unsafe_code)]
 #![warn(clippy::pedantic, clippy::nursery)]
 #![allow(clippy::module_name_repetitions)]
+// Allow async functions without await - stub functions will use async when implemented
+#![allow(clippy::unused_async)]
 
 pub mod cli;
 pub mod core;

@@ -17,9 +17,10 @@ use std::path::PathBuf;
 /// Claude stats cache format (from ~/.claude/stats-cache.json).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[expect(dead_code)]
 struct ClaudeStatsCache {
+    #[allow(dead_code)]
     version: i32,
+    #[allow(dead_code)]
     last_computed_date: String,
     daily_activity: Vec<ClaudeDailyActivity>,
 }
@@ -36,18 +37,19 @@ struct ClaudeDailyActivity {
 
 /// Codex session event from JSONL files.
 #[derive(Debug, Deserialize)]
-#[expect(dead_code)]
 struct CodexEvent {
     timestamp: String,
     #[serde(rename = "type")]
+    #[allow(dead_code)]
     event_type: String,
     #[serde(default)]
+    #[allow(dead_code)]
     payload: Option<serde_json::Value>,
 }
 
 /// Cost scanner for local usage data.
 pub struct CostScanner {
-    #[expect(dead_code)]
+    #[expect(dead_code, reason = "reserved for future path-based scanning")]
     paths: AppPaths,
 }
 
