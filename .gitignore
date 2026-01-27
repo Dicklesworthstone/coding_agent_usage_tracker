@@ -41,3 +41,7 @@ tarpaulin-report.html
 # Test artifacts
 test-logs/
 test-results.log
+
+# Beads sync artifacts
+.beads/.sync.lock
+.beads/sync_base.jsonl
