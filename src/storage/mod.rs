@@ -20,7 +20,8 @@ pub use history::{
 };
 pub use history_schema::{DEFAULT_RETENTION_DAYS, cleanup_old_snapshots, run_migrations};
 pub use multi_account::{
-    Account, CircuitState, MultiAccountDb, ProviderHealth, SwitchLogEntry, SwitchTrigger,
+    Account, CircuitState, MultiAccountDb, NewUsageSnapshot, ProviderHealth, SnapshotTrigger,
+    SwitchLogEntry, SwitchTrigger, UsageSnapshotRecord,
 };
 pub use paths::AppPaths;
 pub use token_accounts::{TokenAccount, TokenAccountStore};

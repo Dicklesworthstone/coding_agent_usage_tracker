@@ -1,9 +1,10 @@
 //! Multi-account storage layer.
 //!
 //! Provides types and database operations for multi-account tracking,
-//! including account registry, switch logging, and provider health.
+//! including account registry, switch logging, provider health, and
+//! account-linked usage snapshots.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -156,6 +157,177 @@ impl CircuitState {
             "half_open" => Self::HalfOpen,
             _ => Self::Closed,
         }
+    }
+}
+
+/// Trigger type for usage snapshot captures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotTrigger {
+    /// User-initiated manual capture.
+    #[default]
+    Manual,
+    /// Automatic capture on account switch.
+    Switch,
+    /// Periodic/scheduled capture.
+    Periodic,
+}
+
+impl SnapshotTrigger {
+    /// Convert to database string representation.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Switch => "switch",
+            Self::Periodic => "periodic",
+        }
+    }
+
+    /// Parse from database string.
+    #[must_use]
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "switch" => Self::Switch,
+            "periodic" => Self::Periodic,
+            _ => Self::Manual,
+        }
+    }
+}
+
+/// A usage snapshot record linked to an account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageSnapshotRecord {
+    /// Database row ID.
+    pub id: i64,
+    /// Account ID this snapshot belongs to (optional for legacy data).
+    pub account_id: Option<String>,
+    /// Provider name.
+    pub provider: String,
+    /// When the snapshot was captured.
+    pub fetched_at: DateTime<Utc>,
+    /// How this snapshot was triggered.
+    pub trigger_type: SnapshotTrigger,
+    /// Source of the data (oauth, cli, web, etc.).
+    pub source: String,
+
+    // Primary rate window
+    pub primary_used_pct: Option<f64>,
+    pub primary_window_minutes: Option<i32>,
+    pub primary_resets_at: Option<DateTime<Utc>>,
+
+    // Secondary rate window
+    pub secondary_used_pct: Option<f64>,
+    pub secondary_window_minutes: Option<i32>,
+    pub secondary_resets_at: Option<DateTime<Utc>>,
+
+    // Tertiary rate window
+    pub tertiary_used_pct: Option<f64>,
+    pub tertiary_window_minutes: Option<i32>,
+    pub tertiary_resets_at: Option<DateTime<Utc>>,
+
+    // Cost data
+    pub cost_today_usd: Option<f64>,
+    pub cost_mtd_usd: Option<f64>,
+    pub credits_remaining: Option<f64>,
+
+    // Identity info
+    pub account_email: Option<String>,
+    pub account_org: Option<String>,
+
+    // Metadata
+    pub fetch_duration_ms: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+/// Builder for creating new usage snapshots.
+#[derive(Debug, Clone, Default)]
+pub struct NewUsageSnapshot {
+    pub account_id: Option<String>,
+    pub provider: String,
+    pub fetched_at: DateTime<Utc>,
+    pub trigger_type: SnapshotTrigger,
+    pub source: String,
+
+    pub primary_used_pct: Option<f64>,
+    pub primary_window_minutes: Option<i32>,
+    pub primary_resets_at: Option<DateTime<Utc>>,
+
+    pub secondary_used_pct: Option<f64>,
+    pub secondary_window_minutes: Option<i32>,
+    pub secondary_resets_at: Option<DateTime<Utc>>,
+
+    pub tertiary_used_pct: Option<f64>,
+    pub tertiary_window_minutes: Option<i32>,
+    pub tertiary_resets_at: Option<DateTime<Utc>>,
+
+    pub cost_today_usd: Option<f64>,
+    pub cost_mtd_usd: Option<f64>,
+    pub credits_remaining: Option<f64>,
+
+    pub account_email: Option<String>,
+    pub account_org: Option<String>,
+
+    pub fetch_duration_ms: Option<i64>,
+}
+
+impl NewUsageSnapshot {
+    /// Create a new snapshot builder for a provider.
+    #[must_use]
+    pub fn new(provider: &str) -> Self {
+        Self {
+            provider: provider.to_string(),
+            fetched_at: Utc::now(),
+            source: "cli".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Set the account ID.
+    #[must_use]
+    pub fn with_account(mut self, account_id: &str) -> Self {
+        self.account_id = Some(account_id.to_string());
+        self
+    }
+
+    /// Set the trigger type.
+    #[must_use]
+    pub fn with_trigger(mut self, trigger: SnapshotTrigger) -> Self {
+        self.trigger_type = trigger;
+        self
+    }
+
+    /// Set the source.
+    #[must_use]
+    pub fn with_source(mut self, source: &str) -> Self {
+        self.source = source.to_string();
+        self
+    }
+
+    /// Set the primary rate window.
+    #[must_use]
+    pub fn with_primary(mut self, used_pct: f64, window_minutes: Option<i32>, resets_at: Option<DateTime<Utc>>) -> Self {
+        self.primary_used_pct = Some(used_pct);
+        self.primary_window_minutes = window_minutes;
+        self.primary_resets_at = resets_at;
+        self
+    }
+
+    /// Set the secondary rate window.
+    #[must_use]
+    pub fn with_secondary(mut self, used_pct: f64, window_minutes: Option<i32>, resets_at: Option<DateTime<Utc>>) -> Self {
+        self.secondary_used_pct = Some(used_pct);
+        self.secondary_window_minutes = window_minutes;
+        self.secondary_resets_at = resets_at;
+        self
+    }
+
+    /// Set account identity info.
+    #[must_use]
+    pub fn with_identity(mut self, email: Option<&str>, org: Option<&str>) -> Self {
+        self.account_email = email.map(String::from);
+        self.account_org = org.map(String::from);
+        self
     }
 }
 
@@ -503,6 +675,268 @@ impl<'a> MultiAccountDb<'a> {
             .map_err(|e| CautError::Other(anyhow::anyhow!("half-open circuit: {e}")))?;
         Ok(())
     }
+
+    // ===== Usage Snapshots =====
+
+    /// Insert a new usage snapshot linked to an account.
+    ///
+    /// Returns the row ID of the inserted snapshot.
+    pub fn insert_snapshot(&self, snapshot: &NewUsageSnapshot) -> Result<i64> {
+        self.conn
+            .execute(
+                r"INSERT INTO usage_snapshots (
+                    account_id, provider, fetched_at, trigger_type, source,
+                    primary_used_pct, primary_window_minutes, primary_resets_at,
+                    secondary_used_pct, secondary_window_minutes, secondary_resets_at,
+                    tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at,
+                    cost_today_usd, cost_mtd_usd, credits_remaining,
+                    account_email, account_org, fetch_duration_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                params![
+                    snapshot.account_id,
+                    snapshot.provider,
+                    snapshot.fetched_at.to_rfc3339(),
+                    snapshot.trigger_type.as_str(),
+                    snapshot.source,
+                    snapshot.primary_used_pct,
+                    snapshot.primary_window_minutes,
+                    snapshot.primary_resets_at.map(|t| t.to_rfc3339()),
+                    snapshot.secondary_used_pct,
+                    snapshot.secondary_window_minutes,
+                    snapshot.secondary_resets_at.map(|t| t.to_rfc3339()),
+                    snapshot.tertiary_used_pct,
+                    snapshot.tertiary_window_minutes,
+                    snapshot.tertiary_resets_at.map(|t| t.to_rfc3339()),
+                    snapshot.cost_today_usd,
+                    snapshot.cost_mtd_usd,
+                    snapshot.credits_remaining,
+                    snapshot.account_email,
+                    snapshot.account_org,
+                    snapshot.fetch_duration_ms,
+                ],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("insert snapshot: {e}")))?;
+
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Get the latest snapshot for an account.
+    pub fn get_latest_snapshot(&self, account_id: &str) -> Result<Option<UsageSnapshotRecord>> {
+        let result = self
+            .conn
+            .query_row(
+                r"SELECT
+                    id, account_id, provider, fetched_at, trigger_type, source,
+                    primary_used_pct, primary_window_minutes, primary_resets_at,
+                    secondary_used_pct, secondary_window_minutes, secondary_resets_at,
+                    tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at,
+                    cost_today_usd, cost_mtd_usd, credits_remaining,
+                    account_email, account_org, fetch_duration_ms, created_at
+                FROM usage_snapshots
+                WHERE account_id = ?1
+                ORDER BY fetched_at DESC
+                LIMIT 1",
+                [account_id],
+                map_snapshot_row,
+            )
+            .optional()
+            .map_err(|e| CautError::Other(anyhow::anyhow!("get latest snapshot: {e}")))?;
+
+        Ok(result)
+    }
+
+    /// Get the latest snapshot for each account of a provider.
+    pub fn get_latest_snapshots_by_provider(&self, provider: &str) -> Result<Vec<UsageSnapshotRecord>> {
+        let mut snapshots = Vec::new();
+
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"SELECT
+                    s.id, s.account_id, s.provider, s.fetched_at, s.trigger_type, s.source,
+                    s.primary_used_pct, s.primary_window_minutes, s.primary_resets_at,
+                    s.secondary_used_pct, s.secondary_window_minutes, s.secondary_resets_at,
+                    s.tertiary_used_pct, s.tertiary_window_minutes, s.tertiary_resets_at,
+                    s.cost_today_usd, s.cost_mtd_usd, s.credits_remaining,
+                    s.account_email, s.account_org, s.fetch_duration_ms, s.created_at
+                FROM usage_snapshots s
+                INNER JOIN (
+                    SELECT account_id, MAX(fetched_at) as max_fetched
+                    FROM usage_snapshots
+                    WHERE provider = ?1 AND account_id IS NOT NULL
+                    GROUP BY account_id
+                ) latest ON s.account_id = latest.account_id AND s.fetched_at = latest.max_fetched
+                WHERE s.provider = ?1",
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("prepare latest by provider: {e}")))?;
+
+        let rows = stmt
+            .query_map([provider], map_snapshot_row)
+            .map_err(|e| CautError::Other(anyhow::anyhow!("query latest by provider: {e}")))?;
+
+        for row in rows {
+            snapshots.push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
+        }
+
+        Ok(snapshots)
+    }
+
+    /// Get snapshots for an account in a time range.
+    pub fn get_snapshots_in_range(
+        &self,
+        account_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<UsageSnapshotRecord>> {
+        if from > to {
+            return Err(CautError::Config(
+                "Time range start must be before end".to_string(),
+            ));
+        }
+
+        let mut snapshots = Vec::new();
+
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"SELECT
+                    id, account_id, provider, fetched_at, trigger_type, source,
+                    primary_used_pct, primary_window_minutes, primary_resets_at,
+                    secondary_used_pct, secondary_window_minutes, secondary_resets_at,
+                    tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at,
+                    cost_today_usd, cost_mtd_usd, credits_remaining,
+                    account_email, account_org, fetch_duration_ms, created_at
+                FROM usage_snapshots
+                WHERE account_id = ?1 AND fetched_at BETWEEN ?2 AND ?3
+                ORDER BY fetched_at DESC",
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("prepare snapshots in range: {e}")))?;
+
+        let rows = stmt
+            .query_map(
+                params![account_id, from.to_rfc3339(), to.to_rfc3339()],
+                map_snapshot_row,
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("query snapshots in range: {e}")))?;
+
+        for row in rows {
+            snapshots.push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
+        }
+
+        Ok(snapshots)
+    }
+
+    /// Get all snapshots for an account (most recent first, with limit).
+    pub fn get_account_snapshots(&self, account_id: &str, limit: i64) -> Result<Vec<UsageSnapshotRecord>> {
+        let mut snapshots = Vec::new();
+
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"SELECT
+                    id, account_id, provider, fetched_at, trigger_type, source,
+                    primary_used_pct, primary_window_minutes, primary_resets_at,
+                    secondary_used_pct, secondary_window_minutes, secondary_resets_at,
+                    tertiary_used_pct, tertiary_window_minutes, tertiary_resets_at,
+                    cost_today_usd, cost_mtd_usd, credits_remaining,
+                    account_email, account_org, fetch_duration_ms, created_at
+                FROM usage_snapshots
+                WHERE account_id = ?1
+                ORDER BY fetched_at DESC
+                LIMIT ?2",
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("prepare account snapshots: {e}")))?;
+
+        let rows = stmt
+            .query_map(params![account_id, limit], map_snapshot_row)
+            .map_err(|e| CautError::Other(anyhow::anyhow!("query account snapshots: {e}")))?;
+
+        for row in rows {
+            snapshots.push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
+        }
+
+        Ok(snapshots)
+    }
+
+    /// Delete snapshots older than a cutoff date for an account.
+    ///
+    /// Returns the number of rows deleted.
+    pub fn cleanup_account_snapshots(&self, account_id: &str, retention_days: i64) -> Result<usize> {
+        if retention_days <= 0 {
+            return Err(CautError::Config(
+                "Retention days must be greater than 0".to_string(),
+            ));
+        }
+
+        let cutoff = Utc::now() - Duration::days(retention_days);
+
+        let deleted = self
+            .conn
+            .execute(
+                "DELETE FROM usage_snapshots WHERE account_id = ?1 AND fetched_at < ?2",
+                params![account_id, cutoff.to_rfc3339()],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("cleanup account snapshots: {e}")))?;
+
+        Ok(deleted)
+    }
+
+    /// Delete all snapshots for an account.
+    ///
+    /// Returns the number of rows deleted.
+    pub fn delete_account_snapshots(&self, account_id: &str) -> Result<usize> {
+        let deleted = self
+            .conn
+            .execute(
+                "DELETE FROM usage_snapshots WHERE account_id = ?1",
+                [account_id],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("delete account snapshots: {e}")))?;
+
+        Ok(deleted)
+    }
+
+    /// Count snapshots for an account.
+    pub fn count_account_snapshots(&self, account_id: &str) -> Result<i64> {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM usage_snapshots WHERE account_id = ?1",
+                [account_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("count account snapshots: {e}")))?;
+
+        Ok(count)
+    }
+}
+
+/// Map a database row to a `UsageSnapshotRecord`.
+fn map_snapshot_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UsageSnapshotRecord> {
+    Ok(UsageSnapshotRecord {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        provider: row.get(2)?,
+        fetched_at: parse_datetime(row.get::<_, String>(3)?),
+        trigger_type: SnapshotTrigger::from_str(&row.get::<_, String>(4)?),
+        source: row.get(5)?,
+        primary_used_pct: row.get(6)?,
+        primary_window_minutes: row.get(7)?,
+        primary_resets_at: row.get::<_, Option<String>>(8)?.map(parse_datetime),
+        secondary_used_pct: row.get(9)?,
+        secondary_window_minutes: row.get(10)?,
+        secondary_resets_at: row.get::<_, Option<String>>(11)?.map(parse_datetime),
+        tertiary_used_pct: row.get(12)?,
+        tertiary_window_minutes: row.get(13)?,
+        tertiary_resets_at: row.get::<_, Option<String>>(14)?.map(parse_datetime),
+        cost_today_usd: row.get(15)?,
+        cost_mtd_usd: row.get(16)?,
+        credits_remaining: row.get(17)?,
+        account_email: row.get(18)?,
+        account_org: row.get(19)?,
+        fetch_duration_ms: row.get(20)?,
+        created_at: row.get::<_, Option<String>>(21)?.map(parse_datetime),
+    })
 }
 
 /// Generate a UUID v4 (pseudo-random, not cryptographically secure).
@@ -663,5 +1097,323 @@ mod tests {
         assert_ne!(id1, id2);
         assert!(id1.contains('-'));
         assert_eq!(id1.len(), 36);
+    }
+
+    // ===== Snapshot Tests =====
+
+    #[test]
+    fn test_insert_and_get_snapshot() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        // Create an account first
+        let account = Account::new("claude", "test@example.com");
+        db.insert_account(&account).expect("insert account");
+
+        // Insert a snapshot
+        let snapshot = NewUsageSnapshot::new("claude")
+            .with_account(&account.id)
+            .with_trigger(SnapshotTrigger::Switch)
+            .with_source("cli")
+            .with_primary(42.5, Some(180), Some(Utc::now() + Duration::minutes(30)))
+            .with_identity(Some("test@example.com"), Some("test-org"));
+
+        let id = db.insert_snapshot(&snapshot).expect("insert snapshot");
+        assert!(id > 0);
+
+        // Get latest snapshot
+        let latest = db.get_latest_snapshot(&account.id).expect("get latest");
+        assert!(latest.is_some());
+        let latest = latest.unwrap();
+        assert_eq!(latest.account_id, Some(account.id.clone()));
+        assert_eq!(latest.provider, "claude");
+        assert_eq!(latest.trigger_type, SnapshotTrigger::Switch);
+        assert_eq!(latest.primary_used_pct, Some(42.5));
+        assert_eq!(latest.primary_window_minutes, Some(180));
+        assert_eq!(latest.account_email, Some("test@example.com".to_string()));
+        assert_eq!(latest.account_org, Some("test-org".to_string()));
+    }
+
+    #[test]
+    fn test_get_latest_snapshots_by_provider() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        // Create two accounts
+        let account1 = Account::new("claude", "user1@example.com");
+        let account2 = Account::new("claude", "user2@example.com");
+        db.insert_account(&account1).expect("insert account1");
+        db.insert_account(&account2).expect("insert account2");
+
+        // Insert snapshots for account1 (older then newer)
+        let old_snapshot1 = NewUsageSnapshot {
+            account_id: Some(account1.id.clone()),
+            provider: "claude".to_string(),
+            fetched_at: Utc::now() - Duration::hours(2),
+            trigger_type: SnapshotTrigger::Periodic,
+            source: "cli".to_string(),
+            primary_used_pct: Some(10.0),
+            ..Default::default()
+        };
+        db.insert_snapshot(&old_snapshot1).expect("insert old1");
+
+        let new_snapshot1 = NewUsageSnapshot {
+            account_id: Some(account1.id.clone()),
+            provider: "claude".to_string(),
+            fetched_at: Utc::now() - Duration::hours(1),
+            trigger_type: SnapshotTrigger::Manual,
+            source: "cli".to_string(),
+            primary_used_pct: Some(20.0),
+            ..Default::default()
+        };
+        db.insert_snapshot(&new_snapshot1).expect("insert new1");
+
+        // Insert snapshot for account2
+        let snapshot2 = NewUsageSnapshot {
+            account_id: Some(account2.id.clone()),
+            provider: "claude".to_string(),
+            fetched_at: Utc::now(),
+            trigger_type: SnapshotTrigger::Switch,
+            source: "web".to_string(),
+            primary_used_pct: Some(30.0),
+            ..Default::default()
+        };
+        db.insert_snapshot(&snapshot2).expect("insert snapshot2");
+
+        // Get latest snapshots by provider
+        let latest = db
+            .get_latest_snapshots_by_provider("claude")
+            .expect("get latest by provider");
+        assert_eq!(latest.len(), 2);
+
+        // Find each account's latest
+        let acc1_latest = latest.iter().find(|s| s.account_id == Some(account1.id.clone()));
+        let acc2_latest = latest.iter().find(|s| s.account_id == Some(account2.id.clone()));
+
+        assert!(acc1_latest.is_some());
+        assert!(acc2_latest.is_some());
+        assert_eq!(acc1_latest.unwrap().primary_used_pct, Some(20.0)); // Newer one
+        assert_eq!(acc2_latest.unwrap().primary_used_pct, Some(30.0));
+    }
+
+    #[test]
+    fn test_get_snapshots_in_range() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let account = Account::new("codex", "test@example.com");
+        db.insert_account(&account).expect("insert account");
+
+        let now = Utc::now();
+
+        // Insert snapshots at different times
+        for hours_ago in [24, 12, 6, 1] {
+            let snapshot = NewUsageSnapshot {
+                account_id: Some(account.id.clone()),
+                provider: "codex".to_string(),
+                fetched_at: now - Duration::hours(hours_ago),
+                trigger_type: SnapshotTrigger::Periodic,
+                source: "cli".to_string(),
+                primary_used_pct: Some(hours_ago as f64),
+                ..Default::default()
+            };
+            db.insert_snapshot(&snapshot).expect("insert snapshot");
+        }
+
+        // Query last 8 hours
+        let from = now - Duration::hours(8);
+        let to = now;
+        let snapshots = db
+            .get_snapshots_in_range(&account.id, from, to)
+            .expect("get in range");
+
+        assert_eq!(snapshots.len(), 2); // 6 hours and 1 hour ago
+        // Should be ordered DESC by time
+        assert_eq!(snapshots[0].primary_used_pct, Some(1.0)); // Most recent first
+        assert_eq!(snapshots[1].primary_used_pct, Some(6.0));
+    }
+
+    #[test]
+    fn test_get_snapshots_in_range_invalid() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let now = Utc::now();
+        let err = db
+            .get_snapshots_in_range("test-id", now, now - Duration::hours(1))
+            .expect_err("should fail");
+
+        assert!(matches!(err, CautError::Config(_)));
+    }
+
+    #[test]
+    fn test_get_account_snapshots_with_limit() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let account = Account::new("gemini", "test@example.com");
+        db.insert_account(&account).expect("insert account");
+
+        // Insert 10 snapshots
+        for i in 0..10 {
+            let snapshot = NewUsageSnapshot {
+                account_id: Some(account.id.clone()),
+                provider: "gemini".to_string(),
+                fetched_at: Utc::now() - Duration::hours(10 - i),
+                trigger_type: SnapshotTrigger::Periodic,
+                source: "cli".to_string(),
+                primary_used_pct: Some(i as f64 * 10.0),
+                ..Default::default()
+            };
+            db.insert_snapshot(&snapshot).expect("insert snapshot");
+        }
+
+        // Get with limit
+        let snapshots = db.get_account_snapshots(&account.id, 5).expect("get with limit");
+        assert_eq!(snapshots.len(), 5);
+        // Should be most recent first
+        assert_eq!(snapshots[0].primary_used_pct, Some(90.0));
+        assert_eq!(snapshots[4].primary_used_pct, Some(50.0));
+    }
+
+    #[test]
+    fn test_cleanup_account_snapshots() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let account = Account::new("claude", "test@example.com");
+        db.insert_account(&account).expect("insert account");
+
+        let now = Utc::now();
+
+        // Insert old snapshot (35 days ago)
+        let old_snapshot = NewUsageSnapshot {
+            account_id: Some(account.id.clone()),
+            provider: "claude".to_string(),
+            fetched_at: now - Duration::days(35),
+            trigger_type: SnapshotTrigger::Manual,
+            source: "cli".to_string(),
+            primary_used_pct: Some(10.0),
+            ..Default::default()
+        };
+        db.insert_snapshot(&old_snapshot).expect("insert old");
+
+        // Insert recent snapshot (5 days ago)
+        let recent_snapshot = NewUsageSnapshot {
+            account_id: Some(account.id.clone()),
+            provider: "claude".to_string(),
+            fetched_at: now - Duration::days(5),
+            trigger_type: SnapshotTrigger::Manual,
+            source: "cli".to_string(),
+            primary_used_pct: Some(20.0),
+            ..Default::default()
+        };
+        db.insert_snapshot(&recent_snapshot).expect("insert recent");
+
+        // Count before cleanup
+        let count_before = db.count_account_snapshots(&account.id).expect("count before");
+        assert_eq!(count_before, 2);
+
+        // Cleanup with 30-day retention
+        let deleted = db
+            .cleanup_account_snapshots(&account.id, 30)
+            .expect("cleanup");
+        assert_eq!(deleted, 1);
+
+        // Count after cleanup
+        let count_after = db.count_account_snapshots(&account.id).expect("count after");
+        assert_eq!(count_after, 1);
+
+        // Verify remaining snapshot is the recent one
+        let latest = db.get_latest_snapshot(&account.id).expect("get latest");
+        assert_eq!(latest.unwrap().primary_used_pct, Some(20.0));
+    }
+
+    #[test]
+    fn test_cleanup_rejects_invalid_retention() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let err = db
+            .cleanup_account_snapshots("test-id", 0)
+            .expect_err("should fail");
+        assert!(matches!(err, CautError::Config(_)));
+
+        let err = db
+            .cleanup_account_snapshots("test-id", -5)
+            .expect_err("should fail");
+        assert!(matches!(err, CautError::Config(_)));
+    }
+
+    #[test]
+    fn test_delete_account_snapshots() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let account = Account::new("claude", "test@example.com");
+        db.insert_account(&account).expect("insert account");
+
+        // Insert multiple snapshots
+        for i in 0..5 {
+            let snapshot = NewUsageSnapshot {
+                account_id: Some(account.id.clone()),
+                provider: "claude".to_string(),
+                fetched_at: Utc::now() - Duration::hours(i),
+                trigger_type: SnapshotTrigger::Periodic,
+                source: "cli".to_string(),
+                primary_used_pct: Some(i as f64 * 10.0),
+                ..Default::default()
+            };
+            db.insert_snapshot(&snapshot).expect("insert snapshot");
+        }
+
+        // Verify count
+        let count = db.count_account_snapshots(&account.id).expect("count");
+        assert_eq!(count, 5);
+
+        // Delete all
+        let deleted = db.delete_account_snapshots(&account.id).expect("delete all");
+        assert_eq!(deleted, 5);
+
+        // Verify empty
+        let count = db.count_account_snapshots(&account.id).expect("count after");
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_snapshot_trigger_conversion() {
+        assert_eq!(SnapshotTrigger::Manual.as_str(), "manual");
+        assert_eq!(SnapshotTrigger::Switch.as_str(), "switch");
+        assert_eq!(SnapshotTrigger::Periodic.as_str(), "periodic");
+
+        assert_eq!(SnapshotTrigger::from_str("manual"), SnapshotTrigger::Manual);
+        assert_eq!(SnapshotTrigger::from_str("switch"), SnapshotTrigger::Switch);
+        assert_eq!(SnapshotTrigger::from_str("periodic"), SnapshotTrigger::Periodic);
+        assert_eq!(SnapshotTrigger::from_str("unknown"), SnapshotTrigger::Manual);
+    }
+
+    #[test]
+    fn test_new_usage_snapshot_builder() {
+        let resets_at = Utc::now() + Duration::hours(1);
+        let snapshot = NewUsageSnapshot::new("codex")
+            .with_account("acc-123")
+            .with_trigger(SnapshotTrigger::Switch)
+            .with_source("oauth")
+            .with_primary(75.5, Some(180), Some(resets_at))
+            .with_secondary(30.0, Some(60), None)
+            .with_identity(Some("user@test.com"), Some("org-name"));
+
+        assert_eq!(snapshot.provider, "codex");
+        assert_eq!(snapshot.account_id, Some("acc-123".to_string()));
+        assert_eq!(snapshot.trigger_type, SnapshotTrigger::Switch);
+        assert_eq!(snapshot.source, "oauth");
+        assert_eq!(snapshot.primary_used_pct, Some(75.5));
+        assert_eq!(snapshot.primary_window_minutes, Some(180));
+        assert!(snapshot.primary_resets_at.is_some());
+        assert_eq!(snapshot.secondary_used_pct, Some(30.0));
+        assert_eq!(snapshot.secondary_window_minutes, Some(60));
+        assert!(snapshot.secondary_resets_at.is_none());
+        assert_eq!(snapshot.account_email, Some("user@test.com".to_string()));
+        assert_eq!(snapshot.account_org, Some("org-name".to_string()));
     }
 }
