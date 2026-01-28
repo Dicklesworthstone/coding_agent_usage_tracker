@@ -5,6 +5,7 @@ pub mod cli_runner;
 pub mod cost_scanner;
 pub mod credential_hash;
 pub mod credential_health;
+pub mod credential_watcher;
 pub mod doctor;
 pub mod fetch_plan;
 pub mod http;
@@ -26,6 +27,7 @@ pub use cost_scanner::CostScanner;
 pub use credential_hash::{
     ChangeType, CredentialHasher, CredentialHashes, IdentityFields,
 };
+pub use credential_watcher::{CredentialWatcher, WatchEvent};
 pub use credential_health::{
     AuthHealthAggregator, CredentialHealth, CredentialHealthReport, CredentialType, HealthSeverity,
     JwtHealth, JwtHealthChecker, OAuthHealth, OverallHealth, ProviderAuthHealth, SourceHealth,
