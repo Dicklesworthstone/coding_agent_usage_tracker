@@ -3,6 +3,7 @@
 pub mod budgets;
 pub mod cli_runner;
 pub mod cost_scanner;
+pub mod credential_hash;
 pub mod credential_health;
 pub mod doctor;
 pub mod fetch_plan;
@@ -22,6 +23,9 @@ pub use budgets::{
     resolve_budget,
 };
 pub use cost_scanner::CostScanner;
+pub use credential_hash::{
+    ChangeType, CredentialHasher, CredentialHashes, IdentityFields,
+};
 pub use credential_health::{
     AuthHealthAggregator, CredentialHealth, CredentialHealthReport, CredentialType, HealthSeverity,
     JwtHealth, JwtHealthChecker, OAuthHealth, OverallHealth, ProviderAuthHealth, SourceHealth,
