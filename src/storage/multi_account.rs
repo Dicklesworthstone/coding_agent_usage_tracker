@@ -151,7 +151,7 @@ impl CircuitState {
 
     /// Parse from database string.
     #[must_use]
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "open" => Self::Open,
             "half_open" => Self::HalfOpen,
@@ -186,7 +186,7 @@ impl SnapshotTrigger {
 
     /// Parse from database string.
     #[must_use]
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "switch" => Self::Switch,
             "periodic" => Self::Periodic,
@@ -738,7 +738,7 @@ impl<'a> MultiAccountDb<'a> {
                         last_success: row.get::<_, Option<String>>(1)?.map(parse_datetime),
                         last_failure: row.get::<_, Option<String>>(2)?.map(parse_datetime),
                         consecutive_failures: row.get(3)?,
-                        circuit_state: CircuitState::from_str(&row.get::<_, String>(4)?),
+                        circuit_state: CircuitState::parse(&row.get::<_, String>(4)?),
                         opened_at: row.get::<_, Option<String>>(5)?.map(parse_datetime),
                         avg_latency_ms: row.get(6)?,
                         p95_latency_ms: row.get(7)?,
@@ -897,6 +897,8 @@ impl<'a> MultiAccountDb<'a> {
     pub fn get_latest_snapshots_by_provider(&self, provider: &str) -> Result<Vec<UsageSnapshotRecord>> {
         let mut snapshots = Vec::new();
 
+        // Use a subquery with both MAX(fetched_at) and MAX(id) to handle ties
+        // in fetched_at timestamps (picks the row with highest id in case of tie)
         let mut stmt = self
             .conn
             .prepare(
@@ -908,13 +910,14 @@ impl<'a> MultiAccountDb<'a> {
                     s.cost_today_usd, s.cost_mtd_usd, s.credits_remaining,
                     s.account_email, s.account_org, s.fetch_duration_ms, s.created_at
                 FROM usage_snapshots s
-                INNER JOIN (
-                    SELECT account_id, MAX(fetched_at) as max_fetched
-                    FROM usage_snapshots
-                    WHERE provider = ?1 AND account_id IS NOT NULL
-                    GROUP BY account_id
-                ) latest ON s.account_id = latest.account_id AND s.fetched_at = latest.max_fetched
-                WHERE s.provider = ?1",
+                WHERE s.provider = ?1
+                  AND s.account_id IS NOT NULL
+                  AND s.id = (
+                      SELECT id FROM usage_snapshots s2
+                      WHERE s2.account_id = s.account_id AND s2.provider = ?1
+                      ORDER BY s2.fetched_at DESC, s2.id DESC
+                      LIMIT 1
+                  )",
             )
             .map_err(|e| CautError::Other(anyhow::anyhow!("prepare latest by provider: {e}")))?;
 
@@ -1066,7 +1069,7 @@ fn map_snapshot_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UsageSnapshotRe
         account_id: row.get(1)?,
         provider: row.get(2)?,
         fetched_at: parse_datetime(row.get::<_, String>(3)?),
-        trigger_type: SnapshotTrigger::from_str(&row.get::<_, String>(4)?),
+        trigger_type: SnapshotTrigger::parse(&row.get::<_, String>(4)?),
         source: row.get(5)?,
         primary_used_pct: row.get(6)?,
         primary_window_minutes: row.get(7)?,
@@ -1711,10 +1714,10 @@ mod tests {
         assert_eq!(SnapshotTrigger::Switch.as_str(), "switch");
         assert_eq!(SnapshotTrigger::Periodic.as_str(), "periodic");
 
-        assert_eq!(SnapshotTrigger::from_str("manual"), SnapshotTrigger::Manual);
-        assert_eq!(SnapshotTrigger::from_str("switch"), SnapshotTrigger::Switch);
-        assert_eq!(SnapshotTrigger::from_str("periodic"), SnapshotTrigger::Periodic);
-        assert_eq!(SnapshotTrigger::from_str("unknown"), SnapshotTrigger::Manual);
+        assert_eq!(SnapshotTrigger::parse("manual"), SnapshotTrigger::Manual);
+        assert_eq!(SnapshotTrigger::parse("switch"), SnapshotTrigger::Switch);
+        assert_eq!(SnapshotTrigger::parse("periodic"), SnapshotTrigger::Periodic);
+        assert_eq!(SnapshotTrigger::parse("unknown"), SnapshotTrigger::Manual);
     }
 
     #[test]

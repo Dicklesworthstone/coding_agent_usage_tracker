@@ -407,14 +407,12 @@ impl CredentialHashes {
     }
 
     /// Parse a combined hash string back into components.
+    ///
+    /// Uses `split_once` to handle edge cases where hash might contain colons.
     #[must_use]
     pub fn from_combined_hash(hash: &str) -> Option<(String, String)> {
-        let parts: Vec<&str> = hash.split(':').collect();
-        if parts.len() == 2 {
-            Some((parts[0].to_string(), parts[1].to_string()))
-        } else {
-            None
-        }
+        hash.split_once(':')
+            .map(|(identity, content)| (identity.to_string(), content.to_string()))
     }
 }
 
