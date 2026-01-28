@@ -501,6 +501,154 @@ impl<'a> MultiAccountDb<'a> {
         Ok(())
     }
 
+    /// Reactivate a deactivated account.
+    pub fn reactivate_account(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE accounts SET is_active = 1, last_seen_at = ?1 WHERE id = ?2",
+                params![Utc::now().to_rfc3339(), id],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("reactivate account: {e}")))?;
+        Ok(())
+    }
+
+    /// Update an account's label.
+    pub fn update_label(&self, id: &str, label: Option<&str>) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE accounts SET label = ?1, last_seen_at = ?2 WHERE id = ?3",
+                params![label, Utc::now().to_rfc3339(), id],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("update label: {e}")))?;
+        Ok(())
+    }
+
+    /// Update an account's metadata.
+    pub fn update_metadata(&self, id: &str, metadata: Option<&str>) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE accounts SET metadata = ?1, last_seen_at = ?2 WHERE id = ?3",
+                params![metadata, Utc::now().to_rfc3339(), id],
+            )
+            .map_err(|e| CautError::Other(anyhow::anyhow!("update metadata: {e}")))?;
+        Ok(())
+    }
+
+    /// Upsert an account: creates if not exists, updates if exists.
+    ///
+    /// Uses (provider, email) as the unique key. On conflict, updates:
+    /// - label (if provided in the new account)
+    /// - credential_hash (if provided)
+    /// - last_seen_at (always updated)
+    /// - is_active (set to true)
+    /// - metadata (if provided)
+    ///
+    /// Returns the account ID (existing or new).
+    pub fn upsert_account(&self, account: &Account) -> Result<String> {
+        // Try to find existing account first
+        if let Some(existing) = self.find_account(&account.provider, &account.email)? {
+            // Update existing account
+            self.conn
+                .execute(
+                    r"UPDATE accounts SET
+                        label = COALESCE(?1, label),
+                        credential_hash = COALESCE(?2, credential_hash),
+                        last_seen_at = ?3,
+                        is_active = 1,
+                        metadata = COALESCE(?4, metadata)
+                      WHERE id = ?5",
+                    params![
+                        account.label,
+                        account.credential_hash,
+                        Utc::now().to_rfc3339(),
+                        account.metadata,
+                        existing.id,
+                    ],
+                )
+                .map_err(|e| CautError::Other(anyhow::anyhow!("upsert update: {e}")))?;
+
+            Ok(existing.id)
+        } else {
+            // Insert new account
+            self.insert_account(account)?;
+            Ok(account.id.clone())
+        }
+    }
+
+    /// Count accounts, optionally filtered by provider.
+    pub fn count_accounts(&self, provider: Option<&str>) -> Result<i64> {
+        let count: i64 = match provider {
+            Some(p) => self
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM accounts WHERE provider = ?1 AND is_active = 1",
+                    [p],
+                    |row| row.get(0),
+                )
+                .map_err(|e| CautError::Other(anyhow::anyhow!("count accounts: {e}")))?,
+            None => self
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM accounts WHERE is_active = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| CautError::Other(anyhow::anyhow!("count accounts: {e}")))?,
+        };
+
+        Ok(count)
+    }
+
+    /// List all accounts including inactive ones.
+    pub fn list_all_accounts(&self, provider: Option<&str>) -> Result<Vec<Account>> {
+        let mut accounts = Vec::new();
+
+        let sql = match provider {
+            Some(_) => {
+                r"SELECT id, provider, email, label, credential_hash, added_at, last_seen_at, is_active, metadata
+                  FROM accounts WHERE provider = ?1 ORDER BY email"
+            }
+            None => {
+                r"SELECT id, provider, email, label, credential_hash, added_at, last_seen_at, is_active, metadata
+                  FROM accounts ORDER BY provider, email"
+            }
+        };
+
+        let mut stmt = self
+            .conn
+            .prepare(sql)
+            .map_err(|e| CautError::Other(anyhow::anyhow!("prepare list all accounts: {e}")))?;
+
+        let rows = if let Some(p) = provider {
+            stmt.query([p])
+        } else {
+            stmt.query([])
+        }
+        .map_err(|e| CautError::Other(anyhow::anyhow!("query all accounts: {e}")))?;
+
+        let mapped = rows.mapped(|row| {
+            Ok(Account {
+                id: row.get(0)?,
+                provider: row.get(1)?,
+                email: row.get(2)?,
+                label: row.get(3)?,
+                credential_hash: row.get(4)?,
+                added_at: parse_datetime(row.get::<_, String>(5)?),
+                last_seen_at: row.get::<_, Option<String>>(6)?.map(parse_datetime),
+                is_active: row.get(7)?,
+                metadata: row.get(8)?,
+            })
+        });
+
+        for account in mapped {
+            accounts.push(
+                account.map_err(|e| CautError::Other(anyhow::anyhow!("read account row: {e}")))?,
+            );
+        }
+
+        Ok(accounts)
+    }
+
     // ===== Switch Log =====
 
     /// Log an account switch.
@@ -1014,6 +1162,183 @@ mod tests {
             .expect("deactivate account");
         let inactive = db.list_accounts(Some("claude")).expect("list after deactivate");
         assert_eq!(inactive.len(), 0);
+    }
+
+    #[test]
+    fn test_upsert_account_creates_new() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        // Upsert should create new account
+        let account = Account::new("claude", "new@example.com").with_label("New Account");
+        let id = db.upsert_account(&account).expect("upsert new");
+        assert_eq!(id, account.id);
+
+        // Verify it was created
+        let fetched = db.get_account(&id).expect("get account");
+        assert!(fetched.is_some());
+        let fetched = fetched.unwrap();
+        assert_eq!(fetched.email, "new@example.com");
+        assert_eq!(fetched.label, Some("New Account".to_string()));
+    }
+
+    #[test]
+    fn test_upsert_account_updates_existing() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        // Create initial account
+        let initial = Account::new("codex", "user@example.com").with_label("Initial Label");
+        db.insert_account(&initial).expect("insert initial");
+
+        // Upsert with new label and credential hash
+        let updated = Account::new("codex", "user@example.com")
+            .with_label("Updated Label")
+            .with_credential_hash("new-hash-123");
+
+        let id = db.upsert_account(&updated).expect("upsert existing");
+
+        // Should return the original ID, not create a new one
+        assert_eq!(id, initial.id);
+
+        // Verify updates were applied
+        let fetched = db.get_account(&id).expect("get account");
+        assert!(fetched.is_some());
+        let fetched = fetched.unwrap();
+        assert_eq!(fetched.label, Some("Updated Label".to_string()));
+        assert_eq!(fetched.credential_hash, Some("new-hash-123".to_string()));
+        assert!(fetched.is_active); // Should be active after upsert
+    }
+
+    #[test]
+    fn test_upsert_reactivates_deactivated() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        // Create and deactivate
+        let account = Account::new("gemini", "test@example.com");
+        db.insert_account(&account).expect("insert");
+        db.deactivate_account(&account.id).expect("deactivate");
+
+        // Verify deactivated
+        let fetched = db.get_account(&account.id).expect("get");
+        assert!(!fetched.unwrap().is_active);
+
+        // Upsert should reactivate
+        let new_data = Account::new("gemini", "test@example.com");
+        db.upsert_account(&new_data).expect("upsert");
+
+        // Verify reactivated
+        let fetched = db.get_account(&account.id).expect("get after upsert");
+        assert!(fetched.unwrap().is_active);
+    }
+
+    #[test]
+    fn test_update_label() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let account = Account::new("claude", "test@example.com");
+        db.insert_account(&account).expect("insert");
+
+        // Set label
+        db.update_label(&account.id, Some("My Work Account"))
+            .expect("set label");
+        let fetched = db.get_account(&account.id).expect("get");
+        assert_eq!(fetched.unwrap().label, Some("My Work Account".to_string()));
+
+        // Clear label
+        db.update_label(&account.id, None).expect("clear label");
+        let fetched = db.get_account(&account.id).expect("get after clear");
+        assert_eq!(fetched.unwrap().label, None);
+    }
+
+    #[test]
+    fn test_update_metadata() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let account = Account::new("codex", "test@example.com");
+        db.insert_account(&account).expect("insert");
+
+        // Set metadata
+        let metadata = r#"{"tier": "pro", "org_id": "org-123"}"#;
+        db.update_metadata(&account.id, Some(metadata))
+            .expect("set metadata");
+        let fetched = db.get_account(&account.id).expect("get");
+        assert_eq!(fetched.unwrap().metadata, Some(metadata.to_string()));
+    }
+
+    #[test]
+    fn test_reactivate_account() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let account = Account::new("claude", "test@example.com");
+        db.insert_account(&account).expect("insert");
+
+        // Deactivate
+        db.deactivate_account(&account.id).expect("deactivate");
+        let count_active = db.count_accounts(Some("claude")).expect("count active");
+        assert_eq!(count_active, 0);
+
+        // Reactivate
+        db.reactivate_account(&account.id).expect("reactivate");
+        let count_active = db.count_accounts(Some("claude")).expect("count after reactivate");
+        assert_eq!(count_active, 1);
+
+        let fetched = db.get_account(&account.id).expect("get");
+        assert!(fetched.unwrap().is_active);
+    }
+
+    #[test]
+    fn test_count_accounts() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        // Empty initially
+        assert_eq!(db.count_accounts(None).expect("count all"), 0);
+
+        // Add accounts for different providers
+        db.insert_account(&Account::new("claude", "user1@example.com"))
+            .expect("insert");
+        db.insert_account(&Account::new("claude", "user2@example.com"))
+            .expect("insert");
+        db.insert_account(&Account::new("codex", "user3@example.com"))
+            .expect("insert");
+
+        // Count all
+        assert_eq!(db.count_accounts(None).expect("count all"), 3);
+
+        // Count by provider
+        assert_eq!(db.count_accounts(Some("claude")).expect("count claude"), 2);
+        assert_eq!(db.count_accounts(Some("codex")).expect("count codex"), 1);
+        assert_eq!(db.count_accounts(Some("gemini")).expect("count gemini"), 0);
+    }
+
+    #[test]
+    fn test_list_all_accounts_includes_inactive() {
+        let conn = open_test_db();
+        let db = MultiAccountDb::new(&conn);
+
+        let active = Account::new("claude", "active@example.com");
+        let inactive = Account::new("claude", "inactive@example.com");
+        db.insert_account(&active).expect("insert active");
+        db.insert_account(&inactive).expect("insert inactive");
+        db.deactivate_account(&inactive.id).expect("deactivate");
+
+        // list_accounts excludes inactive
+        let active_only = db.list_accounts(Some("claude")).expect("list active");
+        assert_eq!(active_only.len(), 1);
+
+        // list_all_accounts includes inactive
+        let all = db.list_all_accounts(Some("claude")).expect("list all");
+        assert_eq!(all.len(), 2);
+
+        // Verify one is inactive
+        let inactive_account = all.iter().find(|a| a.id == inactive.id);
+        assert!(inactive_account.is_some());
+        assert!(!inactive_account.unwrap().is_active);
     }
 
     #[test]
