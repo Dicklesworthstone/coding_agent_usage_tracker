@@ -5,7 +5,7 @@
 //! account-linked usage snapshots.
 
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CautError, Result};
@@ -306,7 +306,12 @@ impl NewUsageSnapshot {
 
     /// Set the primary rate window.
     #[must_use]
-    pub fn with_primary(mut self, used_pct: f64, window_minutes: Option<i32>, resets_at: Option<DateTime<Utc>>) -> Self {
+    pub fn with_primary(
+        mut self,
+        used_pct: f64,
+        window_minutes: Option<i32>,
+        resets_at: Option<DateTime<Utc>>,
+    ) -> Self {
         self.primary_used_pct = Some(used_pct);
         self.primary_window_minutes = window_minutes;
         self.primary_resets_at = resets_at;
@@ -315,7 +320,12 @@ impl NewUsageSnapshot {
 
     /// Set the secondary rate window.
     #[must_use]
-    pub fn with_secondary(mut self, used_pct: f64, window_minutes: Option<i32>, resets_at: Option<DateTime<Utc>>) -> Self {
+    pub fn with_secondary(
+        mut self,
+        used_pct: f64,
+        window_minutes: Option<i32>,
+        resets_at: Option<DateTime<Utc>>,
+    ) -> Self {
         self.secondary_used_pct = Some(used_pct);
         self.secondary_window_minutes = window_minutes;
         self.secondary_resets_at = resets_at;
@@ -894,7 +904,10 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Get the latest snapshot for each account of a provider.
-    pub fn get_latest_snapshots_by_provider(&self, provider: &str) -> Result<Vec<UsageSnapshotRecord>> {
+    pub fn get_latest_snapshots_by_provider(
+        &self,
+        provider: &str,
+    ) -> Result<Vec<UsageSnapshotRecord>> {
         let mut snapshots = Vec::new();
 
         // Use a subquery with both MAX(fetched_at) and MAX(id) to handle ties
@@ -926,7 +939,8 @@ impl<'a> MultiAccountDb<'a> {
             .map_err(|e| CautError::Other(anyhow::anyhow!("query latest by provider: {e}")))?;
 
         for row in rows {
-            snapshots.push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
+            snapshots
+                .push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
         }
 
         Ok(snapshots)
@@ -971,14 +985,19 @@ impl<'a> MultiAccountDb<'a> {
             .map_err(|e| CautError::Other(anyhow::anyhow!("query snapshots in range: {e}")))?;
 
         for row in rows {
-            snapshots.push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
+            snapshots
+                .push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
         }
 
         Ok(snapshots)
     }
 
     /// Get all snapshots for an account (most recent first, with limit).
-    pub fn get_account_snapshots(&self, account_id: &str, limit: i64) -> Result<Vec<UsageSnapshotRecord>> {
+    pub fn get_account_snapshots(
+        &self,
+        account_id: &str,
+        limit: i64,
+    ) -> Result<Vec<UsageSnapshotRecord>> {
         let mut snapshots = Vec::new();
 
         let mut stmt = self
@@ -1003,7 +1022,8 @@ impl<'a> MultiAccountDb<'a> {
             .map_err(|e| CautError::Other(anyhow::anyhow!("query account snapshots: {e}")))?;
 
         for row in rows {
-            snapshots.push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
+            snapshots
+                .push(row.map_err(|e| CautError::Other(anyhow::anyhow!("map snapshot row: {e}")))?);
         }
 
         Ok(snapshots)
@@ -1012,7 +1032,11 @@ impl<'a> MultiAccountDb<'a> {
     /// Delete snapshots older than a cutoff date for an account.
     ///
     /// Returns the number of rows deleted.
-    pub fn cleanup_account_snapshots(&self, account_id: &str, retention_days: i64) -> Result<usize> {
+    pub fn cleanup_account_snapshots(
+        &self,
+        account_id: &str,
+        retention_days: i64,
+    ) -> Result<usize> {
         if retention_days <= 0 {
             return Err(CautError::Config(
                 "Retention days must be greater than 0".to_string(),
@@ -1163,7 +1187,9 @@ mod tests {
         // Deactivate
         db.deactivate_account(&account.id)
             .expect("deactivate account");
-        let inactive = db.list_accounts(Some("claude")).expect("list after deactivate");
+        let inactive = db
+            .list_accounts(Some("claude"))
+            .expect("list after deactivate");
         assert_eq!(inactive.len(), 0);
     }
 
@@ -1287,7 +1313,9 @@ mod tests {
 
         // Reactivate
         db.reactivate_account(&account.id).expect("reactivate");
-        let count_active = db.count_accounts(Some("claude")).expect("count after reactivate");
+        let count_active = db
+            .count_accounts(Some("claude"))
+            .expect("count after reactivate");
         assert_eq!(count_active, 1);
 
         let fetched = db.get_account(&account.id).expect("get");
@@ -1515,8 +1543,12 @@ mod tests {
         assert_eq!(latest.len(), 2);
 
         // Find each account's latest
-        let acc1_latest = latest.iter().find(|s| s.account_id == Some(account1.id.clone()));
-        let acc2_latest = latest.iter().find(|s| s.account_id == Some(account2.id.clone()));
+        let acc1_latest = latest
+            .iter()
+            .find(|s| s.account_id == Some(account1.id.clone()));
+        let acc2_latest = latest
+            .iter()
+            .find(|s| s.account_id == Some(account2.id.clone()));
 
         assert!(acc1_latest.is_some());
         assert!(acc2_latest.is_some());
@@ -1597,7 +1629,9 @@ mod tests {
         }
 
         // Get with limit
-        let snapshots = db.get_account_snapshots(&account.id, 5).expect("get with limit");
+        let snapshots = db
+            .get_account_snapshots(&account.id, 5)
+            .expect("get with limit");
         assert_eq!(snapshots.len(), 5);
         // Should be most recent first
         assert_eq!(snapshots[0].primary_used_pct, Some(90.0));
@@ -1639,7 +1673,9 @@ mod tests {
         db.insert_snapshot(&recent_snapshot).expect("insert recent");
 
         // Count before cleanup
-        let count_before = db.count_account_snapshots(&account.id).expect("count before");
+        let count_before = db
+            .count_account_snapshots(&account.id)
+            .expect("count before");
         assert_eq!(count_before, 2);
 
         // Cleanup with 30-day retention
@@ -1649,7 +1685,9 @@ mod tests {
         assert_eq!(deleted, 1);
 
         // Count after cleanup
-        let count_after = db.count_account_snapshots(&account.id).expect("count after");
+        let count_after = db
+            .count_account_snapshots(&account.id)
+            .expect("count after");
         assert_eq!(count_after, 1);
 
         // Verify remaining snapshot is the recent one
@@ -1700,11 +1738,15 @@ mod tests {
         assert_eq!(count, 5);
 
         // Delete all
-        let deleted = db.delete_account_snapshots(&account.id).expect("delete all");
+        let deleted = db
+            .delete_account_snapshots(&account.id)
+            .expect("delete all");
         assert_eq!(deleted, 5);
 
         // Verify empty
-        let count = db.count_account_snapshots(&account.id).expect("count after");
+        let count = db
+            .count_account_snapshots(&account.id)
+            .expect("count after");
         assert_eq!(count, 0);
     }
 
@@ -1716,7 +1758,10 @@ mod tests {
 
         assert_eq!(SnapshotTrigger::parse("manual"), SnapshotTrigger::Manual);
         assert_eq!(SnapshotTrigger::parse("switch"), SnapshotTrigger::Switch);
-        assert_eq!(SnapshotTrigger::parse("periodic"), SnapshotTrigger::Periodic);
+        assert_eq!(
+            SnapshotTrigger::parse("periodic"),
+            SnapshotTrigger::Periodic
+        );
         assert_eq!(SnapshotTrigger::parse("unknown"), SnapshotTrigger::Manual);
     }
 

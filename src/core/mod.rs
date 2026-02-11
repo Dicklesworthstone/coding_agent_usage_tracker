@@ -24,15 +24,13 @@ pub use budgets::{
     resolve_budget,
 };
 pub use cost_scanner::CostScanner;
-pub use credential_hash::{
-    ChangeType, CredentialHasher, CredentialHashes, IdentityFields,
-};
-pub use credential_watcher::{CredentialWatcher, WatchEvent};
+pub use credential_hash::{ChangeType, CredentialHasher, CredentialHashes, IdentityFields};
 pub use credential_health::{
     AuthHealthAggregator, CredentialHealth, CredentialHealthReport, CredentialType, HealthSeverity,
     JwtHealth, JwtHealthChecker, OAuthHealth, OverallHealth, ProviderAuthHealth, SourceHealth,
     check_oauth_file, check_oauth_json, get_reauth_instructions,
 };
+pub use credential_watcher::{CredentialWatcher, WatchEvent};
 pub use doctor::{CheckStatus, DiagnosticCheck, DoctorReport, ProviderHealth};
 pub use fetch_plan::{FetchAttempt, FetchOutcome, FetchStrategy};
 pub use models::{

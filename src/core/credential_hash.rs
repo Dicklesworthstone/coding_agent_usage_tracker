@@ -144,7 +144,10 @@ impl CredentialHasher {
     /// Reads the file and extracts identity fields plus computes hashes.
     pub fn hash_file(&self, path: &Path) -> Result<CredentialHashes> {
         let content = fs::read_to_string(path).map_err(|e| {
-            CautError::Other(anyhow::anyhow!("read credential file '{}': {e}", path.display()))
+            CautError::Other(anyhow::anyhow!(
+                "read credential file '{}': {e}",
+                path.display()
+            ))
         })?;
 
         self.hash_content(&content)
@@ -233,7 +236,13 @@ impl CredentialHasher {
 
         // Try various common field names for identity
         // Email fields
-        for key in ["email", "user_email", "account_email", "userEmail", "accountEmail"] {
+        for key in [
+            "email",
+            "user_email",
+            "account_email",
+            "userEmail",
+            "accountEmail",
+        ] {
             if let Some(v) = json.get(key).and_then(|v| v.as_str()) {
                 fields.email = Some(v.to_string());
                 break;
@@ -249,7 +258,14 @@ impl CredentialHasher {
         }
 
         // Organization fields
-        for key in ["organization", "org", "team", "org_id", "orgId", "workspace"] {
+        for key in [
+            "organization",
+            "org",
+            "team",
+            "org_id",
+            "orgId",
+            "workspace",
+        ] {
             if let Some(v) = json.get(key).and_then(|v| v.as_str()) {
                 fields.organization = Some(v.to_string());
                 break;
@@ -257,7 +273,13 @@ impl CredentialHasher {
         }
 
         // Account name fields
-        for key in ["name", "account_name", "accountName", "display_name", "displayName"] {
+        for key in [
+            "name",
+            "account_name",
+            "accountName",
+            "display_name",
+            "displayName",
+        ] {
             if let Some(v) = json.get(key).and_then(|v| v.as_str()) {
                 fields.account_name = Some(v.to_string());
                 break;
@@ -269,10 +291,14 @@ impl CredentialHasher {
             if let Some(token) = json.get("id_token").and_then(|v| v.as_str()) {
                 if let Some(claims) = self.decode_jwt_claims(token) {
                     if fields.email.is_none() {
-                        fields.email = claims.get("email").and_then(|v| v.as_str()).map(String::from);
+                        fields.email = claims
+                            .get("email")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
                     }
                     if fields.user_id.is_none() {
-                        fields.user_id = claims.get("sub").and_then(|v| v.as_str()).map(String::from);
+                        fields.user_id =
+                            claims.get("sub").and_then(|v| v.as_str()).map(String::from);
                     }
                 }
             }
@@ -336,12 +362,7 @@ impl CredentialHasher {
                     }
                     sorted.insert(k, self.normalize_json(v));
                 }
-                serde_json::Value::Object(
-                    sorted
-                        .into_iter()
-                        .map(|(k, v)| (k.clone(), v))
-                        .collect(),
-                )
+                serde_json::Value::Object(sorted.into_iter().map(|(k, v)| (k.clone(), v)).collect())
             }
             serde_json::Value::Array(arr) => {
                 serde_json::Value::Array(arr.iter().map(|v| self.normalize_json(v)).collect())
@@ -435,7 +456,10 @@ mod tests {
 
         assert!(!hashes.identity_hash.is_empty());
         assert!(!hashes.content_hash.is_empty());
-        assert_eq!(hashes.identity_fields.email, Some("user@example.com".to_string()));
+        assert_eq!(
+            hashes.identity_fields.email,
+            Some("user@example.com".to_string())
+        );
     }
 
     #[test]
@@ -651,7 +675,10 @@ mod tests {
         let hashes = hasher.hash_content(&content).expect("hash");
 
         // Should extract email and sub from JWT
-        assert_eq!(hashes.identity_fields.email, Some("jwt@example.com".to_string()));
+        assert_eq!(
+            hashes.identity_fields.email,
+            Some("jwt@example.com".to_string())
+        );
         assert_eq!(hashes.identity_fields.user_id, Some("user123".to_string()));
     }
 
