@@ -163,25 +163,50 @@ async fn check_claude_auth() -> CheckStatus {
     match std::fs::read_to_string(&creds_path) {
         Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
             Ok(json) => {
-                // Check for valid credentials structure
-                if let Some(email) = json
-                    .get("credentials")
-                    .and_then(|c| c.get("email"))
-                    .and_then(|e| e.as_str())
-                {
-                    CheckStatus::Pass {
-                        details: Some(format!("Logged in as {}", email)),
-                    }
-                } else if json.get("credentials").is_some() {
-                    CheckStatus::Pass {
-                        details: Some("Credentials present".to_string()),
-                    }
-                } else {
-                    CheckStatus::Fail {
-                        reason: "Invalid credentials format".to_string(),
-                        suggestion: Some(Provider::Claude.auth_suggestion().to_string()),
-                    }
-                }
+                // Claude's .credentials.json uses top-level keys:
+                //   "claudeAiOauth" (main auth with accessToken, subscriptionType, etc.)
+                //   "mcpOAuth" (MCP plugin OAuth tokens)
+                json.get("claudeAiOauth").map_or_else(
+                    || {
+                        // No primary Claude OAuth; check for MCP-only auth
+                        if json.get("mcpOAuth").is_some() {
+                            CheckStatus::Fail {
+                                reason: "Only MCP OAuth found, no primary Claude auth".to_string(),
+                                suggestion: Some(Provider::Claude.auth_suggestion().to_string()),
+                            }
+                        } else {
+                            CheckStatus::Fail {
+                                reason: "Invalid credentials format (no claudeAiOauth key)"
+                                    .to_string(),
+                                suggestion: Some(Provider::Claude.auth_suggestion().to_string()),
+                            }
+                        }
+                    },
+                    |oauth| {
+                        // Extract subscription type for richer status
+                        let sub_type = oauth
+                            .get("subscriptionType")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("unknown");
+                        let has_token = oauth
+                            .get("accessToken")
+                            .and_then(|t| t.as_str())
+                            .is_some_and(|s| !s.is_empty());
+
+                        if has_token {
+                            CheckStatus::Pass {
+                                details: Some(format!(
+                                    "Authenticated via OAuth (plan: {sub_type})"
+                                )),
+                            }
+                        } else {
+                            CheckStatus::Fail {
+                                reason: "OAuth entry present but access token missing".to_string(),
+                                suggestion: Some(Provider::Claude.auth_suggestion().to_string()),
+                            }
+                        }
+                    },
+                )
             }
             Err(e) => CheckStatus::Fail {
                 reason: format!("Credentials file invalid: {}", e),
