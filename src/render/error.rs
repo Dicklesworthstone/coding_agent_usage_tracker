@@ -94,11 +94,11 @@ fn render_rich(error: &CautError) -> String {
     }
 
     // Context section (why this happened)
-    if let Some(context) = suggestions.first().map(|s| &s.context) {
-        if !context.is_empty() {
-            lines.push(String::new());
-            lines.push(render_context_section(context, &theme));
-        }
+    if let Some(context) = suggestions.first().map(|s| &s.context)
+        && !context.is_empty()
+    {
+        lines.push(String::new());
+        lines.push(render_context_section(context, &theme));
     }
 
     // Prevention tips
@@ -123,7 +123,7 @@ fn render_header(error: &CautError, theme: &ThemeConfig) -> String {
     let error_style = &theme.error;
     let muted_style = &theme.muted;
 
-    let header_text = format!("{}", error);
+    let header_text = format!("{error}");
     let code_text = format!(" [{}]", error.error_code());
 
     let segments = vec![
@@ -171,7 +171,7 @@ fn render_context_section(context: &str, theme: &ThemeConfig) -> String {
 
     // Wrap text to ~60 chars for readability
     for line in wrap_text(context, 60) {
-        lines.push(format!("  {}", line));
+        lines.push(format!("  {line}"));
     }
 
     lines.join("\n")
@@ -185,7 +185,7 @@ fn render_prevention_section(prevention: &str, theme: &ThemeConfig) -> String {
     lines.push(segments_to_string(&[header], false));
 
     for line in wrap_text(prevention, 60) {
-        lines.push(format!("  {}", line));
+        lines.push(format!("  {line}"));
     }
 
     lines.join("\n")
@@ -231,18 +231,18 @@ fn render_simple(error: &CautError) -> String {
     lines.push(format!("Error [{}]: {}", error.error_code(), error));
 
     // First command suggestion
-    if let Some(suggestion) = suggestions.first() {
-        if let Some(cmd) = suggestion.commands.first() {
-            // Skip comments
-            if !cmd.starts_with('#') {
-                lines.push(format!("Fix: {}", cmd));
-            } else if suggestion.commands.len() > 1 {
-                // Try second command if first is a comment
-                if let Some(cmd2) = suggestion.commands.get(1) {
-                    if !cmd2.starts_with('#') {
-                        lines.push(format!("Fix: {}", cmd2));
-                    }
-                }
+    if let Some(suggestion) = suggestions.first()
+        && let Some(cmd) = suggestion.commands.first()
+    {
+        // Skip comments
+        if !cmd.starts_with('#') {
+            lines.push(format!("Fix: {cmd}"));
+        } else if suggestion.commands.len() > 1 {
+            // Try second command if first is a comment
+            if let Some(cmd2) = suggestion.commands.get(1)
+                && !cmd2.starts_with('#')
+            {
+                lines.push(format!("Fix: {cmd2}"));
             }
         }
     }
@@ -319,10 +319,12 @@ fn segments_to_string(segments: &[Segment], no_color: bool) -> String {
     segments
         .iter()
         .map(|seg| {
-            if no_color || seg.style.is_none() {
+            if no_color {
                 seg.text.to_string()
+            } else if let Some(style) = seg.style.as_ref() {
+                style.render(&seg.text, color_system)
             } else {
-                seg.style.as_ref().unwrap().render(&seg.text, color_system)
+                seg.text.to_string()
             }
         })
         .collect()
@@ -513,8 +515,7 @@ mod tests {
         for line in &wrapped {
             assert!(
                 line.len() <= 25, // Allow some overflow for long words
-                "Line too long: {}",
-                line
+                "Line too long: {line}"
             );
         }
     }

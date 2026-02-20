@@ -1,4 +1,4 @@
-//! Human-readable output using rich_rust.
+//! Human-readable output using `rich_rust`.
 //!
 //! Renders usage and cost data with styled panels, tables, and progress bars.
 
@@ -6,6 +6,7 @@ use crate::core::models::{CostPayload, ProviderPayload, RateWindow, StatusIndica
 use crate::error::Result;
 use rich_rust::prelude::*;
 use rich_rust::{Color, ColorSystem, Segment, Style};
+use std::fmt::Write;
 use std::time::Instant;
 use tracing::Level;
 
@@ -20,10 +21,12 @@ fn segments_to_string(segments: &[Segment], no_color: bool) -> String {
     segments
         .iter()
         .map(|seg| {
-            if no_color || seg.style.is_none() {
+            if no_color {
                 seg.text.to_string()
+            } else if let Some(style) = seg.style.as_ref() {
+                style.render(&seg.text, color_system)
             } else {
-                seg.style.as_ref().unwrap().render(&seg.text, color_system)
+                seg.text.to_string()
             }
         })
         .collect()
@@ -41,6 +44,9 @@ fn percentage_color(percent: f64) -> Color {
 }
 
 /// Render usage results for human consumption.
+///
+/// # Errors
+/// Returns an error if rendering fails (infallible in practice).
 pub fn render_usage(results: &[ProviderPayload], no_color: bool) -> Result<String> {
     let _theme = crate::rich::get_theme();
     let mut output = String::new();
@@ -90,10 +96,10 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
     }
 
     // Identity
-    if let Some(identity) = &payload.usage.identity {
-        if let Some(email) = &identity.account_email {
-            content_lines.push(vec![Segment::plain(format!("Account: {}", email))]);
-        }
+    if let Some(identity) = &payload.usage.identity
+        && let Some(email) = &identity.account_email
+    {
+        content_lines.push(vec![Segment::plain(format!("Account: {email}"))]);
     }
 
     // Status
@@ -168,12 +174,12 @@ fn format_rate_window_segments<'a>(
 
     // Label
     let label_style = Style::new().bold();
-    segments.push(Segment::styled(format!("{}: ", label), label_style));
+    segments.push(Segment::styled(format!("{label}: "), label_style));
 
     // Percentage
     let pct_color = percentage_color(remaining);
     let pct_style = Style::new().color(pct_color.clone());
-    segments.push(Segment::styled(format!("{:.0}% ", remaining), pct_style));
+    segments.push(Segment::styled(format!("{remaining:.0}% "), pct_style));
 
     // Progress bar using rich_rust
     let bar_color = if no_color {
@@ -181,7 +187,7 @@ fn format_rate_window_segments<'a>(
     } else {
         pct_color
     };
-    let bar_style = Style::new().color(bar_color.clone());
+    let bar_style = Style::new().color(bar_color);
     let remaining_style = Style::new().color(Color::parse("bright_black").unwrap());
 
     let mut bar = ProgressBar::with_total(100)
@@ -195,7 +201,7 @@ fn format_rate_window_segments<'a>(
     segments.extend(bar.render(16));
 
     // Reset info
-    segments.push(Segment::plain(format!(" {}", reset)));
+    segments.push(Segment::plain(format!(" {reset}")));
 
     segments
 }
@@ -232,7 +238,7 @@ fn format_status_segments(
     segments.push(Segment::styled(label, style));
 
     if let Some(desc) = description {
-        segments.push(Segment::plain(format!(" – {}", desc)));
+        segments.push(Segment::plain(format!(" – {desc}")));
     }
 
     segments
@@ -249,13 +255,22 @@ fn format_auth_warning_segments(warning: &str, no_color: bool) -> Vec<Segment<'s
         Style::new().color(Color::parse("yellow").unwrap()).bold()
     };
 
-    segments.push(Segment::styled("⚠ ".to_string(), warning_style.clone()));
+    segments.push(Segment::styled(
+        "\u{26A0} ".to_string(),
+        warning_style.clone(),
+    ));
     segments.push(Segment::styled(warning.to_string(), warning_style));
 
     segments
 }
 
 /// Render cost results for human consumption.
+///
+/// # Errors
+/// Returns an error if rendering fails (infallible in practice).
+///
+/// # Panics
+/// Panics if the color string `"magenta"` cannot be parsed (should never happen).
 pub fn render_cost(results: &[CostPayload], no_color: bool) -> Result<String> {
     let _theme = crate::rich::get_theme();
     let mut output = String::new();
@@ -271,9 +286,13 @@ pub fn render_cost(results: &[CostPayload], no_color: bool) -> Result<String> {
         // Today's usage
         let today_text = match (payload.session_cost_usd, payload.session_tokens) {
             (Some(cost), Some(tokens)) => {
-                format!("Today: ${:.2} · {} messages", cost, format_number(tokens))
+                format!(
+                    "Today: ${:.2} \u{00B7} {} messages",
+                    cost,
+                    format_number(tokens)
+                )
             }
-            (Some(cost), None) => format!("Today: ${:.2}", cost),
+            (Some(cost), None) => format!("Today: ${cost:.2}"),
             (None, Some(tokens)) => format!("Today: {} messages", format_number(tokens)),
             (None, None) => "Today: No activity".to_string(),
         };
@@ -283,12 +302,12 @@ pub fn render_cost(results: &[CostPayload], no_color: bool) -> Result<String> {
         let monthly_text = match (payload.last_30_days_cost_usd, payload.last_30_days_tokens) {
             (Some(cost), Some(tokens)) => {
                 format!(
-                    "Last 30 days: ${:.2} · {} messages",
+                    "Last 30 days: ${:.2} \u{00B7} {} messages",
                     cost,
                     format_number(tokens)
                 )
             }
-            (Some(cost), None) => format!("Last 30 days: ${:.2}", cost),
+            (Some(cost), None) => format!("Last 30 days: ${cost:.2}"),
             (None, Some(tokens)) => format!("Last 30 days: {} messages", format_number(tokens)),
             (None, None) => "Last 30 days: No activity".to_string(),
         };
@@ -361,7 +380,9 @@ impl Default for HistoryRenderOptions {
     }
 }
 
-const SPARKLINE_UNICODE: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+const SPARKLINE_UNICODE: [char; 8] = [
+    '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}',
+];
 const SPARKLINE_ASCII: [char; 8] = ['.', ':', '-', '=', '+', '*', '#', '@'];
 
 /// Render a history chart for a provider.
@@ -375,8 +396,8 @@ pub fn render_history_chart(
     let term_width = options.max_width.unwrap_or_else(terminal_width);
     let bar_width = term_width.saturating_sub(30).clamp(10, 40);
 
-    let separator = if options.use_unicode { '━' } else { '-' };
-    output.push_str(&format!("{} Usage (Last {} Days)\n", provider, days.len()));
+    let separator = if options.use_unicode { '\u{2501}' } else { '-' };
+    let _ = writeln!(output, "{} Usage (Last {} Days)", provider, days.len());
     output.push_str(&separator.to_string().repeat(term_width.min(60)));
     output.push('\n');
 
@@ -390,11 +411,11 @@ pub fn render_history_chart(
         let pct = clamp_percent(day.avg_primary_pct);
         let cost = day
             .total_cost
-            .map(|c| format!(" ${:.2}", c))
+            .map(|c| format!(" ${c:.2}"))
             .unwrap_or_default();
         let marker = if day.hit_limit {
             if options.use_unicode {
-                " ← Hit limit"
+                " \u{2190} Hit limit"
             } else {
                 " <- Hit limit"
             }
@@ -402,10 +423,11 @@ pub fn render_history_chart(
             ""
         };
 
-        output.push_str(&format!(
-            "{}: {} {:>5.1}%{}{}\n",
+        let _ = writeln!(
+            output,
+            "{}: {} {:>5.1}%{}{}",
             day.label, bar, pct, cost, marker
-        ));
+        );
     }
 
     if !days.is_empty() {
@@ -420,7 +442,7 @@ pub fn render_history_chart(
         );
 
         output.push('\n');
-        output.push_str(&format!("Trend: {}  {}\n", sparkline, trend));
+        let _ = writeln!(output, "Trend: {sparkline}  {trend}");
     }
 
     output
@@ -440,15 +462,19 @@ fn average(values: &[f64]) -> Option<f64> {
         return None;
     }
     let sum: f64 = values.iter().sum();
+    #[allow(clippy::cast_precision_loss)] // slice length fits in f64
     Some(sum / values.len() as f64)
 }
 
 fn render_bar(percent: f64, width: usize, no_color: bool, use_unicode: bool) -> String {
     let pct = clamp_percent(percent);
-    let filled = ((pct / 100.0) * width as f64).round() as usize;
+    #[allow(clippy::cast_precision_loss)] // bar width fits in f64
+    let width_f64 = width as f64;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // intentional rounding
+    let filled = ((pct / 100.0) * width_f64).round() as usize;
     let empty = width.saturating_sub(filled);
     let (full_char, empty_char) = if use_unicode {
-        ('█', '░')
+        ('\u{2588}', '\u{2591}')
     } else {
         ('#', '-')
     };
@@ -490,7 +516,11 @@ fn render_sparkline(values: &[f64], use_unicode: bool) -> String {
         .iter()
         .map(|&v| {
             let normalized = if range > 0.0 { (v - min) / range } else { 0.5 };
-            let idx = (normalized * (chars.len() - 1) as f64).round() as usize;
+            #[allow(clippy::cast_precision_loss)] // chars.len() is small
+            let chars_max = (chars.len() - 1) as f64;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            // intentional rounding
+            let idx = (normalized * chars_max).round() as usize;
             chars[idx.min(chars.len() - 1)]
         })
         .collect()
@@ -510,32 +540,27 @@ fn render_trend_indicator(
 
     let (arrow, color) = if change_pct > 10.0 {
         (
-            if use_unicode { '↗' } else { '^' },
+            if use_unicode { '\u{2197}' } else { '^' },
             Color::parse("red").unwrap(),
         )
     } else if change_pct > 2.0 {
         (
-            if use_unicode { '↗' } else { '^' },
+            if use_unicode { '\u{2197}' } else { '^' },
             Color::parse("yellow").unwrap(),
-        )
-    } else if change_pct < -10.0 {
-        (
-            if use_unicode { '↘' } else { 'v' },
-            Color::parse("green").unwrap(),
         )
     } else if change_pct < -2.0 {
         (
-            if use_unicode { '↘' } else { 'v' },
+            if use_unicode { '\u{2198}' } else { 'v' },
             Color::parse("green").unwrap(),
         )
     } else {
         (
-            if use_unicode { '→' } else { '-' },
+            if use_unicode { '\u{2192}' } else { '-' },
             Color::parse("white").unwrap(),
         )
     };
 
-    let text = format!("{} {:+.1}%", arrow, change_pct);
+    let text = format!("{arrow} {change_pct:+.1}%");
     colorize_text(&text, color, no_color)
 }
 
@@ -548,17 +573,15 @@ fn colorize_text(text: &str, color: Color, no_color: bool) -> String {
 }
 
 fn repeat_char(ch: char, count: usize) -> String {
-    std::iter::repeat(ch).take(count).collect()
+    std::iter::repeat_n(ch, count).collect()
 }
 
-fn clamp_percent(percent: f64) -> f64 {
+const fn clamp_percent(percent: f64) -> f64 {
     percent.clamp(0.0, 100.0)
 }
 
 fn terminal_width() -> usize {
-    crossterm::terminal::size()
-        .map(|(w, _)| w as usize)
-        .unwrap_or(80)
+    crossterm::terminal::size().map_or(80, |(w, _)| w as usize)
 }
 
 fn supports_unicode() -> bool {
@@ -566,7 +589,7 @@ fn supports_unicode() -> bool {
         return false;
     }
 
-    if std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false) {
+    if std::env::var("TERM").is_ok_and(|t| t == "dumb") {
         return false;
     }
 
@@ -582,11 +605,13 @@ fn supports_unicode() -> bool {
 fn format_number(n: i64) -> String {
     let s = n.to_string();
     let bytes: Vec<_> = s.bytes().rev().collect();
-    let chunks: Vec<_> = bytes
+
+    bytes
         .chunks(3)
         .map(|chunk| chunk.iter().rev().map(|&b| b as char).collect::<String>())
-        .collect();
-    chunks.into_iter().rev().collect::<Vec<_>>().join(",")
+        .rev()
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[cfg(test)]
@@ -879,7 +904,7 @@ mod tests {
         let segments = format_status_segments(StatusIndicator::Major, Some("API is down"), true);
         let text: String = segments.iter().map(|s| s.text.clone()).collect();
 
-        assert_contains!(&text, "– API is down");
+        assert_contains!(&text, "\u{2013} API is down");
     }
 
     // =========================================================================
@@ -968,8 +993,8 @@ mod tests {
     fn render_bar_unicode_width() {
         let bar = render_bar(72.0, 10, true, true);
         assert_eq!(bar.chars().count(), 10);
-        assert_contains!(&bar, "█");
-        assert_contains!(&bar, "░");
+        assert_contains!(&bar, "\u{2588}");
+        assert_contains!(&bar, "\u{2591}");
     }
 
     #[test]
@@ -1034,8 +1059,8 @@ mod tests {
 
     #[test]
     fn format_number_millions() {
-        assert_eq!(format_number(1000000), "1,000,000");
-        assert_eq!(format_number(1234567), "1,234,567");
+        assert_eq!(format_number(1_000_000), "1,000,000");
+        assert_eq!(format_number(1_234_567), "1,234,567");
     }
 
     #[test]
@@ -1059,7 +1084,7 @@ mod tests {
     fn no_color_mode_preserves_content() {
         let payload = make_test_provider_payload("codex", "cli");
 
-        let with_color = render_usage(&[payload.clone()], false).unwrap();
+        let with_color = render_usage(std::slice::from_ref(&payload), false).unwrap();
         let without_color = render_usage(&[payload], true).unwrap();
 
         // Strip ANSI codes from colored version for comparison

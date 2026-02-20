@@ -140,7 +140,7 @@ impl ProviderHealth {
             && self
                 .credential_health
                 .as_ref()
-                .map_or(true, |c| c.status.is_ready())
+                .is_none_or(|c| c.status.is_ready())
             && self.api_reachable.status.is_ready()
     }
 
@@ -152,7 +152,7 @@ impl ProviderHealth {
             || self
                 .credential_health
                 .as_ref()
-                .map_or(false, |c| c.status.needs_attention())
+                .is_some_and(|c| c.status.needs_attention())
             || self.api_reachable.status.needs_attention()
     }
 }
@@ -169,10 +169,10 @@ pub struct DoctorReport {
 }
 
 impl DoctorReport {
-    /// Returns (ready_count, needs_attention_count).
+    /// Returns (`ready_count`, `needs_attention_count`).
     ///
     /// Counts providers as ready only when all checks are pass/skip.
-    /// Adds one needs-attention entry if config_status is not ready.
+    /// Adds one needs-attention entry if `config_status` is not ready.
     #[must_use]
     pub fn summary(&self) -> (usize, usize) {
         let mut ready = 0;

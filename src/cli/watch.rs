@@ -54,6 +54,10 @@ impl WatchState {
 }
 
 /// Run watch mode for the usage command.
+///
+/// # Errors
+/// Returns an error if the initial fetch fails or if rendering encounters
+/// an I/O or serialization error.
 pub async fn run_watch(
     args: &UsageArgs,
     format: OutputFormat,
@@ -153,11 +157,7 @@ mod tests {
         };
 
         state.update(Ok(results));
-        let before_len = state
-            .last_results
-            .as_ref()
-            .map(|results| results.len())
-            .unwrap_or(0);
+        let before_len = state.last_results.as_ref().map_or(0, std::vec::Vec::len);
 
         state.update(Err(CautError::Config("boom".to_string())));
 
@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(state.error_count, 1);
         assert!(state.last_error.is_some());
         assert_eq!(
-            state.last_results.as_ref().map(|results| results.len()),
+            state.last_results.as_ref().map(std::vec::Vec::len),
             Some(before_len)
         );
     }

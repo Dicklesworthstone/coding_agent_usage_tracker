@@ -57,7 +57,7 @@ pub fn smoothed_velocity(history: &[StoredSnapshot], window: Duration, alpha: f6
 
     let mut ema = velocities[0];
     for v in &velocities[1..] {
-        ema = alpha * v + (1.0 - alpha) * ema;
+        ema = (1.0 - alpha).mul_add(ema, alpha * v);
     }
 
     Some(ema)
@@ -72,35 +72,38 @@ pub fn detect_reset(prev: &StoredSnapshot, curr: &StoredSnapshot) -> bool {
     prev_pct > 50.0 && curr_pct < 10.0 && (prev_pct - curr_pct) > 40.0
 }
 
-fn recent_points<'a>(history: &'a [StoredSnapshot], window: Duration) -> Vec<&'a StoredSnapshot> {
+fn recent_points(history: &[StoredSnapshot], window: Duration) -> Vec<&StoredSnapshot> {
     let cutoff = Utc::now() - window;
     let mut points: Vec<&StoredSnapshot> = history
         .iter()
         .filter(|s| s.fetched_at >= cutoff && s.primary_used_pct.is_some())
         .collect();
-    points.sort_by(|a, b| a.fetched_at.cmp(&b.fetched_at));
+    points.sort_by_key(|a| a.fetched_at);
     points
 }
 
 fn strip_resets<'a>(points: &'a [&'a StoredSnapshot]) -> Vec<&'a StoredSnapshot> {
     let mut segment: Vec<&StoredSnapshot> = Vec::new();
     for point in points {
-        if let Some(prev) = segment.last().copied() {
-            if detect_reset(prev, point) {
-                segment.clear();
-            }
+        if let Some(prev) = segment.last().copied()
+            && detect_reset(prev, point)
+        {
+            segment.clear();
         }
         segment.push(*point);
     }
     segment
 }
 
+#[allow(clippy::similar_names)]
 fn linear_regression_slope(points: &[&StoredSnapshot]) -> Option<f64> {
+    #[allow(clippy::cast_precision_loss)] // point count will never exceed f64 precision
     let n = points.len() as f64;
     if n < 2.0 {
         return None;
     }
 
+    #[allow(clippy::cast_precision_loss)] // timestamp fits within f64 precision for current era
     let base_time = points[0].fetched_at.timestamp() as f64;
 
     let mut sum_x = 0.0;
@@ -109,6 +112,7 @@ fn linear_regression_slope(points: &[&StoredSnapshot]) -> Option<f64> {
     let mut sum_xx = 0.0;
 
     for point in points {
+        #[allow(clippy::cast_precision_loss)] // timestamp fits within f64 precision for current era
         let x = point.fetched_at.timestamp() as f64 - base_time;
         let y = point.primary_used_pct?;
 
@@ -118,12 +122,12 @@ fn linear_regression_slope(points: &[&StoredSnapshot]) -> Option<f64> {
         sum_xx += x * x;
     }
 
-    let denominator = n * sum_xx - sum_x * sum_x;
+    let denominator = n.mul_add(sum_xx, -(sum_x * sum_x));
     if denominator.abs() < f64::EPSILON {
         return None;
     }
 
-    Some((n * sum_xy - sum_x * sum_y) / denominator)
+    Some(n.mul_add(sum_xy, -(sum_x * sum_y)) / denominator)
 }
 
 fn interval_velocities(points: &[&StoredSnapshot]) -> Vec<f64> {
@@ -137,13 +141,11 @@ fn interval_velocities(points: &[&StoredSnapshot]) -> Vec<f64> {
             continue;
         }
 
-        let prev_pct = match prev.primary_used_pct {
-            Some(v) => v,
-            None => continue,
+        let Some(prev_pct) = prev.primary_used_pct else {
+            continue;
         };
-        let curr_pct = match curr.primary_used_pct {
-            Some(v) => v,
-            None => continue,
+        let Some(curr_pct) = curr.primary_used_pct else {
+            continue;
         };
 
         let elapsed_secs = (curr.fetched_at - prev.fetched_at).num_seconds();
@@ -151,6 +153,7 @@ fn interval_velocities(points: &[&StoredSnapshot]) -> Vec<f64> {
             continue;
         }
 
+        #[allow(clippy::cast_precision_loss)] // elapsed seconds won't exceed f64 precision
         let per_second = (curr_pct - prev_pct) / elapsed_secs as f64;
         velocities.push(per_second * 3600.0);
     }

@@ -25,7 +25,7 @@ pub async fn fetch_provider(provider: Provider, mode: SourceMode) -> FetchOutcom
             provider,
             CautError::UnsupportedSource {
                 provider: provider.cli_name().to_string(),
-                source_type: format!("{:?}", mode),
+                source_type: format!("{mode:?}"),
             },
             vec![],
         );
@@ -55,6 +55,7 @@ pub async fn fetch_provider(provider: Provider, mode: SourceMode) -> FetchOutcom
 
         // Execute the fetch
         let result = execute_strategy(provider, strategy.id, strategy.kind).await;
+        #[allow(clippy::cast_possible_truncation)] // fetch durations won't exceed u64::MAX ms
         let duration_ms = start.elapsed().as_millis() as u64;
 
         let attempt = FetchAttempt {
@@ -136,7 +137,7 @@ async fn execute_strategy(
         (Provider::Claude, "claude-oauth") => {
             // Get token from keyring
             let entry = keyring::Entry::new("caut", "claude-oauth-token")
-                .map_err(|e| CautError::Config(format!("Keyring error: {}", e)))?;
+                .map_err(|e| CautError::Config(format!("Keyring error: {e}")))?;
             let token = entry
                 .get_password()
                 .map_err(|_| CautError::Config("No OAuth token found".to_string()))?;
@@ -148,7 +149,7 @@ async fn execute_strategy(
         // Unknown strategy
         _ => Err(CautError::FetchFailed {
             provider: provider.cli_name().to_string(),
-            reason: format!("Unknown strategy: {}", strategy_id),
+            reason: format!("Unknown strategy: {strategy_id}"),
         }),
     }
 }
@@ -180,17 +181,18 @@ async fn fetch_provider_with_timeout(
     mode: SourceMode,
     timeout_duration: Duration,
 ) -> FetchOutcome {
-    match timeout(timeout_duration, fetch_provider(provider, mode)).await {
-        Ok(outcome) => outcome,
-        Err(_) => FetchOutcome::failure(
-            provider,
-            CautError::TimeoutWithProvider {
-                provider: provider.cli_name().to_string(),
-                seconds: timeout_duration.as_secs(),
-            },
-            Vec::new(),
-        ),
-    }
+    timeout(timeout_duration, fetch_provider(provider, mode))
+        .await
+        .unwrap_or_else(|_| {
+            FetchOutcome::failure(
+                provider,
+                CautError::TimeoutWithProvider {
+                    provider: provider.cli_name().to_string(),
+                    seconds: timeout_duration.as_secs(),
+                },
+                Vec::new(),
+            )
+        })
 }
 
 #[cfg(test)]

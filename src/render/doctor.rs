@@ -6,6 +6,7 @@ use crate::core::doctor::{CheckStatus, DiagnosticCheck, DoctorReport, ProviderHe
 use crate::error::Result;
 use rich_rust::prelude::*;
 use rich_rust::{Color, ColorSystem, Segment, Style};
+use std::fmt::Write;
 use std::time::Instant;
 use tracing::Level;
 
@@ -14,6 +15,9 @@ use tracing::Level;
 // =============================================================================
 
 /// Render a doctor report for human consumption.
+///
+/// # Errors
+/// Returns an error if rendering fails (infallible in practice).
 pub fn render_human(report: &DoctorReport, no_color: bool) -> Result<String> {
     let start = if tracing::enabled!(Level::DEBUG) {
         Some(Instant::now())
@@ -62,7 +66,7 @@ fn render_header(_report: &DoctorReport, no_color: bool) -> String {
 
     if no_color {
         let border = "-".repeat(title.len() + 4);
-        format!("{}\n| {} |\n{}", border, title, border)
+        format!("{border}\n| {title} |\n{border}")
     } else {
         let title_text = Text::styled(
             title,
@@ -117,7 +121,7 @@ fn render_provider_health(health: &ProviderHealth, no_color: bool) -> String {
     // Provider name
     let provider_name = health.provider.display_name();
     if no_color {
-        output.push_str(&format!("{}\n", provider_name));
+        let _ = writeln!(output, "{provider_name}");
     } else {
         let style = Style::new().bold();
         output.push_str(&style.render(provider_name, ColorSystem::TrueColor));
@@ -127,7 +131,7 @@ fn render_provider_health(health: &ProviderHealth, no_color: bool) -> String {
     // CLI installed check
     output.push_str(&render_check_line(&health.cli_installed, "  ", no_color));
     if let Some(version) = &health.cli_version {
-        output.push_str(&format!("      {}\n", version));
+        let _ = writeln!(output, "      {version}");
     } else {
         output.push('\n');
     }
@@ -145,7 +149,7 @@ fn render_provider_health(health: &ProviderHealth, no_color: bool) -> String {
     // API reachable check
     output.push_str(&render_check_line(&health.api_reachable, "  ", no_color));
     if let Some(duration) = health.api_reachable.duration {
-        output.push_str(&format!("      {}ms\n", duration.as_millis()));
+        let _ = writeln!(output, "      {}ms", duration.as_millis());
     } else {
         output.push('\n');
     }
@@ -167,7 +171,7 @@ fn render_check_line(check: &DiagnosticCheck, indent: &str, no_color: bool) -> S
     match &check.status {
         CheckStatus::Pass { details } => {
             if let Some(details) = details {
-                output.push_str(&format!("  {}", details));
+                let _ = write!(output, "  {details}");
             }
         }
         CheckStatus::Warning {
@@ -176,28 +180,28 @@ fn render_check_line(check: &DiagnosticCheck, indent: &str, no_color: bool) -> S
         } => {
             output.push('\n');
             output.push_str(&colorize_line_status(
-                &format!("{}    {}", indent, details),
+                &format!("{indent}    {details}"),
                 &check.status,
                 no_color,
             ));
             if let Some(suggestion) = suggestion {
                 let arrow = if no_color { "->" } else { "\u{2192}" };
-                output.push_str(&format!("\n{}    {} {}", indent, arrow, suggestion));
+                let _ = write!(output, "\n{indent}    {arrow} {suggestion}");
             }
         }
         CheckStatus::Fail { reason, suggestion } => {
             output.push('\n');
-            output.push_str(&format!("{}    {}\n", indent, reason));
+            let _ = writeln!(output, "{indent}    {reason}");
             if let Some(suggestion) = suggestion {
                 let arrow = if no_color { "->" } else { "\u{2192}" };
-                output.push_str(&format!("{}    {} {}", indent, arrow, suggestion));
+                let _ = write!(output, "{indent}    {arrow} {suggestion}");
             }
         }
         CheckStatus::Skipped { reason } => {
-            output.push_str(&format!("  ({})", reason));
+            let _ = write!(output, "  ({reason})");
         }
         CheckStatus::Timeout { after } => {
-            output.push_str(&format!("  (timeout after {}s)", after.as_secs()));
+            let _ = write!(output, "  (timeout after {}s)", after.as_secs());
         }
     }
 
@@ -214,15 +218,13 @@ fn render_summary(report: &DoctorReport, no_color: bool) -> String {
     let (ready, needs_attention) = report.summary();
     let duration_ms = report.total_duration.as_millis();
 
-    let summary_text = format!(
-        "Summary: {} ready, {} need attention",
-        ready, needs_attention
-    );
+    let summary_text = format!("Summary: {ready} ready, {needs_attention} need attention");
 
+    #[allow(clippy::cast_precision_loss)] // duration in ms fits in f64
     let time_text = format!("[{:.1}s]", duration_ms as f64 / 1000.0);
 
     if no_color {
-        output.push_str(&format!("{:<50} {}\n", summary_text, time_text));
+        let _ = writeln!(output, "{summary_text:<50} {time_text}");
     } else {
         let color = if needs_attention > 0 {
             "yellow"
@@ -234,14 +236,14 @@ fn render_summary(report: &DoctorReport, no_color: bool) -> String {
         let dim_time = Style::new()
             .dim()
             .render(&time_text, ColorSystem::TrueColor);
-        output.push_str(&format!("{:<50} {}\n", styled_summary, dim_time));
+        let _ = writeln!(output, "{styled_summary:<50} {dim_time}");
     }
 
     output
 }
 
 /// Get status icon for pass/fail.
-fn status_icon(is_ok: bool, no_color: bool) -> &'static str {
+const fn status_icon(is_ok: bool, no_color: bool) -> &'static str {
     if no_color {
         if is_ok { "[OK]" } else { "[!!]" }
     } else {
@@ -250,7 +252,7 @@ fn status_icon(is_ok: bool, no_color: bool) -> &'static str {
 }
 
 /// Get status icon with warning support.
-fn status_icon_detailed(status: &CheckStatus, no_color: bool) -> &'static str {
+const fn status_icon_detailed(status: &CheckStatus, no_color: bool) -> &'static str {
     match status {
         CheckStatus::Pass { .. } => {
             if no_color { "[OK]" } else { "\u{2713}" } // ✓
@@ -278,7 +280,7 @@ fn colorize_line(line: &str, is_ok: bool, no_color: bool) -> String {
     }
 }
 
-/// Colorize a line based on CheckStatus (with warning support).
+/// Colorize a line based on `CheckStatus` (with warning support).
 fn colorize_line_status(line: &str, status: &CheckStatus, no_color: bool) -> String {
     if no_color {
         line.to_string()
@@ -310,10 +312,12 @@ fn segments_to_string(segments: &[Segment], no_color: bool) -> String {
     segments
         .iter()
         .map(|seg| {
-            if no_color || seg.style.is_none() {
+            if no_color {
                 seg.text.to_string()
+            } else if let Some(style) = seg.style.as_ref() {
+                style.render(&seg.text, color_system)
             } else {
-                seg.style.as_ref().unwrap().render(&seg.text, color_system)
+                seg.text.to_string()
             }
         })
         .collect()
@@ -324,6 +328,9 @@ fn segments_to_string(segments: &[Segment], no_color: bool) -> String {
 // =============================================================================
 
 /// Render a doctor report as JSON.
+///
+/// # Errors
+/// Returns an error if JSON serialization fails.
 pub fn render_json(report: &DoctorReport, pretty: bool) -> Result<String> {
     let json = if pretty {
         serde_json::to_string_pretty(report)?
@@ -338,6 +345,9 @@ pub fn render_json(report: &DoctorReport, pretty: bool) -> Result<String> {
 // =============================================================================
 
 /// Render a doctor report as Markdown.
+///
+/// # Errors
+/// Returns an error if formatting fails (infallible in practice).
 pub fn render_md(report: &DoctorReport) -> Result<String> {
     let mut output = String::new();
 
@@ -345,15 +355,17 @@ pub fn render_md(report: &DoctorReport) -> Result<String> {
 
     // Installation section
     output.push_str("## Installation\n\n");
-    output.push_str(&format!(
-        "- caut: v{} ({})\n",
+    let _ = writeln!(
+        output,
+        "- caut: v{} ({})",
         report.caut_version,
         short_sha(&report.caut_git_sha)
-    ));
-    output.push_str(&format!(
-        "- config: {}\n",
+    );
+    let _ = writeln!(
+        output,
+        "- config: {}",
         format_check_status_md(&report.config_status)
-    ));
+    );
     output.push('\n');
 
     // Providers section
@@ -361,26 +373,30 @@ pub fn render_md(report: &DoctorReport) -> Result<String> {
         output.push_str("## Providers\n\n");
 
         for health in &report.providers {
-            output.push_str(&format!("### {}\n\n", health.provider.display_name()));
-            output.push_str(&format!("| Check | Status |\n|-------|--------|\n"));
-            output.push_str(&format!(
-                "| CLI installed | {} |\n",
+            let _ = writeln!(output, "### {}\n", health.provider.display_name());
+            output.push_str("| Check | Status |\n|-------|--------|\n");
+            let _ = writeln!(
+                output,
+                "| CLI installed | {} |",
                 format_check_status_md(&health.cli_installed)
-            ));
-            output.push_str(&format!(
-                "| Authenticated | {} |\n",
+            );
+            let _ = writeln!(
+                output,
+                "| Authenticated | {} |",
                 format_check_status_md(&health.authenticated)
-            ));
+            );
             if let Some(ref cred_health) = health.credential_health {
-                output.push_str(&format!(
-                    "| Credential health | {} |\n",
+                let _ = writeln!(
+                    output,
+                    "| Credential health | {} |",
                     format_check_status_md(cred_health)
-                ));
+                );
             }
-            output.push_str(&format!(
-                "| API reachable | {} |\n",
+            let _ = writeln!(
+                output,
+                "| API reachable | {} |",
                 format_check_status_md(&health.api_reachable)
-            ));
+            );
             output.push('\n');
         }
     }
@@ -388,12 +404,12 @@ pub fn render_md(report: &DoctorReport) -> Result<String> {
     // Summary
     let (ready, needs_attention) = report.summary();
     output.push_str("## Summary\n\n");
-    output.push_str(&format!(
-        "- **Ready:** {}\n- **Needs attention:** {}\n- **Duration:** {:.1}s\n",
-        ready,
-        needs_attention,
-        report.total_duration.as_millis() as f64 / 1000.0
-    ));
+    #[allow(clippy::cast_precision_loss)] // duration in ms fits in f64
+    let duration_secs = report.total_duration.as_millis() as f64 / 1000.0;
+    let _ = writeln!(
+        output,
+        "- **Ready:** {ready}\n- **Needs attention:** {needs_attention}\n- **Duration:** {duration_secs:.1}s"
+    );
 
     Ok(output)
 }
@@ -403,32 +419,31 @@ fn format_check_status_md(check: &DiagnosticCheck) -> String {
     match &check.status {
         CheckStatus::Pass { details } => {
             let icon = "\u{2705}"; // ✅
-            match details {
-                Some(d) => format!("{} {}", icon, d),
-                None => format!("{} OK", icon),
-            }
+            details
+                .as_ref()
+                .map_or_else(|| format!("{icon} OK"), |d| format!("{icon} {d}"))
         }
         CheckStatus::Warning {
             details,
             suggestion,
         } => {
             let icon = "\u{26A0}\u{FE0F}"; // ⚠️
-            let mut s = format!("{} {}", icon, details);
+            let mut s = format!("{icon} {details}");
             if let Some(sug) = suggestion {
-                s.push_str(&format!(" *({})* ", sug));
+                let _ = write!(s, " *({sug})* ");
             }
             s
         }
         CheckStatus::Fail { reason, suggestion } => {
             let icon = "\u{274C}"; // ❌
-            let mut s = format!("{} {}", icon, reason);
+            let mut s = format!("{icon} {reason}");
             if let Some(sug) = suggestion {
-                s.push_str(&format!(" *({})* ", sug));
+                let _ = write!(s, " *({sug})* ");
             }
             s
         }
         CheckStatus::Skipped { reason } => {
-            format!("\u{23ED} Skipped: {}", reason) // ⏭
+            format!("\u{23ED} Skipped: {reason}") // ⏭
         }
         CheckStatus::Timeout { after } => {
             format!("\u{23F1} Timeout after {}s", after.as_secs()) // ⏱

@@ -145,10 +145,9 @@ pub fn auth_expired_suggestions(provider: &str) -> Vec<FixSuggestion> {
                 format!("caut auth login {}", provider),
             ],
             format!(
-                "Your OAuth token for {} has expired. Tokens are typically valid for \
+                "Your OAuth token for {provider} has expired. Tokens are typically valid for \
                  24 hours. The token may have been revoked if you logged out elsewhere \
-                 or changed your password.",
-                provider
+                 or changed your password."
             ),
         )
         .with_prevention(
@@ -167,10 +166,9 @@ pub fn auth_not_configured_suggestions(provider: &str) -> Vec<FixSuggestion> {
             format!("caut setup {}", provider),
         ],
         format!(
-            "No credentials found for {}. This provider requires authentication \
+            "No credentials found for {provider}. This provider requires authentication \
                  to access usage data. You may need to complete the OAuth flow or \
-                 provide an API key.",
-            provider
+                 provide an API key."
         ),
     )]
 }
@@ -185,9 +183,8 @@ pub fn auth_invalid_suggestions(provider: &str, reason: &str) -> Vec<FixSuggesti
                 format!("caut auth login {}", provider),
             ],
             format!(
-                "The credentials for {} are invalid: {}. This typically happens when \
-                 API keys are revoked, passwords change, or OAuth scopes are modified.",
-                provider, reason
+                "The credentials for {provider} are invalid: {reason}. This typically happens when \
+                 API keys are revoked, passwords change, or OAuth scopes are modified."
             ),
         )
         .with_prevention(
@@ -211,9 +208,8 @@ pub fn timeout_suggestions(provider: &str, seconds: u64) -> Vec<FixSuggestion> {
                 "caut doctor".to_string(),
             ],
             format!(
-                "The {} provider did not respond within {}s. This could be due to \
-                 network issues, provider slowness, or the CLI tool being unresponsive.",
-                provider, seconds
+                "The {provider} provider did not respond within {seconds}s. This could be due to \
+                 network issues, provider slowness, or the CLI tool being unresponsive."
             ),
         )
         .with_prevention(
@@ -234,9 +230,8 @@ pub fn dns_failure_suggestions(host: &str) -> Vec<FixSuggestion> {
                 "cat /etc/resolv.conf".to_string(),
             ],
             format!(
-                "DNS resolution failed for {}. The hostname could not be resolved to \
-                 an IP address. This may indicate network configuration issues.",
-                host
+                "DNS resolution failed for {host}. The hostname could not be resolved to \
+                 an IP address. This may indicate network configuration issues."
             ),
         )
         .with_prevention(
@@ -256,9 +251,8 @@ pub fn ssl_error_suggestions(message: &str) -> Vec<FixSuggestion> {
                 "openssl s_client -connect api.example.com:443 -showcerts".to_string(),
             ],
             format!(
-                "SSL/TLS handshake or certificate verification failed: {}. This may \
-                 indicate certificate issues, proxy interference, or outdated CA certs.",
-                message
+                "SSL/TLS handshake or certificate verification failed: {message}. This may \
+                 indicate certificate issues, proxy interference, or outdated CA certs."
             ),
         )
         .with_prevention(
@@ -279,9 +273,8 @@ pub fn connection_refused_suggestions(host: &str) -> Vec<FixSuggestion> {
                 "netstat -tuln | grep LISTEN".to_string(),
             ],
             format!(
-                "Connection to {} was refused. The server is not accepting connections \
-                 on the expected port. This may indicate the service is down.",
-                host
+                "Connection to {host} was refused. The server is not accepting connections \
+                 on the expected port. This may indicate the service is down."
             ),
         )
         .with_prevention(
@@ -298,9 +291,8 @@ pub fn config_not_found_suggestions(path: &str) -> Vec<FixSuggestion> {
         FixSuggestion::new(
             vec!["caut config init".to_string(), format!("touch {}", path)],
             format!(
-                "Configuration file not found at {}. This file is needed for caut \
-                 to know which providers to query and how to authenticate.",
-                path
+                "Configuration file not found at {path}. This file is needed for caut \
+                 to know which providers to query and how to authenticate."
             ),
         )
         .auto_fixable(),
@@ -314,7 +306,7 @@ pub fn config_parse_suggestions(
     line: Option<usize>,
     message: &str,
 ) -> Vec<FixSuggestion> {
-    let line_info = line.map_or(String::new(), |l| format!(" on line {}", l));
+    let line_info = line.map_or(String::new(), |l| format!(" on line {l}"));
     vec![
         FixSuggestion::new(
             vec![
@@ -323,8 +315,7 @@ pub fn config_parse_suggestions(
                 "caut config init --force".to_string(),
             ],
             format!(
-                "The config file has a syntax error{}. The TOML parser reported: {}",
-                line_info, message
+                "The config file has a syntax error{line_info}. The TOML parser reported: {message}"
             ),
         )
         .with_prevention(
@@ -342,10 +333,7 @@ pub fn config_invalid_suggestions(key: &str, value: &str, message: &str) -> Vec<
             format!("caut config set {} <valid_value>", key),
             "caut config show".to_string(),
         ],
-        format!(
-            "Invalid config value for '{}': '{}'. {}",
-            key, value, message
-        ),
+        format!("Invalid config value for '{key}': '{value}'. {message}"),
     )]
 }
 
@@ -375,10 +363,7 @@ pub fn rate_limited_suggestions(
     vec![
         FixSuggestion::new(
             vec![wait_cmd],
-            format!(
-                "You have been rate limited by {}: {}. {}",
-                provider, message, wait_info
-            ),
+            format!("You have been rate limited by {provider}: {message}. {wait_info}"),
         )
         .with_prevention(
             "Use `caut usage --watch` with longer intervals to avoid hitting rate \
@@ -397,9 +382,8 @@ pub fn provider_unavailable_suggestions(provider: &str, message: &str) -> Vec<Fi
                 "# Check provider status page".to_string(),
             ],
             format!(
-                "The {} provider is temporarily unavailable: {}. This is usually \
-                 a transient issue on the provider's side.",
-                provider, message
+                "The {provider} provider is temporarily unavailable: {message}. This is usually \
+                 a transient issue on the provider's side."
             ),
         )
         .with_prevention(
@@ -416,16 +400,13 @@ pub fn provider_api_error_suggestions(
     status_code: Option<u16>,
     message: &str,
 ) -> Vec<FixSuggestion> {
-    let status_info = status_code.map_or(String::new(), |c| format!(" (HTTP {})", c));
+    let status_info = status_code.map_or(String::new(), |c| format!(" (HTTP {c})"));
     vec![FixSuggestion::new(
         vec![
             format!("caut doctor --provider {}", provider),
             "caut auth status".to_string(),
         ],
-        format!(
-            "The {} API returned an error{}: {}",
-            provider, status_info, message
-        ),
+        format!("The {provider} API returned an error{status_info}: {message}"),
     )]
 }
 
@@ -438,9 +419,8 @@ pub fn cli_not_found_suggestions(name: &str) -> Vec<FixSuggestion> {
     let mut suggestion = FixSuggestion::new(
         commands,
         format!(
-            "The {} CLI tool is not installed or not in PATH. This provider \
-             requires the CLI to fetch usage data.",
-            name
+            "The {name} CLI tool is not installed or not in PATH. This provider \
+             requires the CLI to fetch usage data."
         ),
     );
 
@@ -461,9 +441,8 @@ pub fn permission_denied_suggestions(path: &str) -> Vec<FixSuggestion> {
             format!("# Or: sudo chown $USER {}", path),
         ],
         format!(
-            "Permission denied accessing {}. The file or directory may have \
-                 restrictive permissions or be owned by another user.",
-            path
+            "Permission denied accessing {path}. The file or directory may have \
+                 restrictive permissions or be owned by another user."
         ),
     )]
 }
@@ -477,9 +456,8 @@ pub fn env_var_missing_suggestions(name: &str) -> Vec<FixSuggestion> {
             format!("# Or add to ~/.bashrc: export {}=\"...\"", name),
         ],
         format!(
-            "The environment variable {} is required but not set. This may be \
-                 needed for authentication or configuration.",
-            name
+            "The environment variable {name} is required but not set. This may be \
+                 needed for authentication or configuration."
         ),
     )]
 }
@@ -493,9 +471,8 @@ pub fn invalid_provider_suggestions(name: &str) -> Vec<FixSuggestion> {
             "caut usage --help".to_string(),
         ],
         format!(
-            "Unknown provider: '{}'. Use `caut providers list` to see available \
-                 providers.",
-            name
+            "Unknown provider: '{name}'. Use `caut providers list` to see available \
+                 providers."
         ),
     )]
 }
@@ -506,9 +483,8 @@ pub fn unsupported_source_suggestions(provider: &str, source_type: &str) -> Vec<
     vec![FixSuggestion::new(
         vec![format!("caut providers show {}", provider)],
         format!(
-            "The source type '{}' is not supported for provider {}. Check which \
-                 sources are available for this provider.",
-            source_type, provider
+            "The source type '{source_type}' is not supported for provider {provider}. Check which \
+                 sources are available for this provider."
         ),
     )]
 }
@@ -521,7 +497,7 @@ pub fn fetch_failed_suggestions(provider: &str, reason: &str) -> Vec<FixSuggesti
             format!("caut doctor --provider {}", provider),
             "caut auth status".to_string(),
         ],
-        format!("Failed to fetch usage data from {}: {}", provider, reason),
+        format!("Failed to fetch usage data from {provider}: {reason}"),
     )]
 }
 
@@ -534,9 +510,8 @@ pub fn no_strategy_suggestions(provider: &str) -> Vec<FixSuggestion> {
             format!("caut setup {}", provider),
         ],
         format!(
-            "No fetch strategy is available for {}. This usually means the CLI \
-                 is not installed and no web/API authentication is configured.",
-            provider
+            "No fetch strategy is available for {provider}. This usually means the CLI \
+                 is not installed and no web/API authentication is configured."
         ),
     )]
 }
@@ -550,9 +525,8 @@ pub fn account_not_found_suggestions(account: &str) -> Vec<FixSuggestion> {
             "caut auth status".to_string(),
         ],
         format!(
-            "Account '{}' not found. Use `caut accounts list` to see configured \
-                 accounts.",
-            account
+            "Account '{account}' not found. Use `caut accounts list` to see configured \
+                 accounts."
         ),
     )]
 }
@@ -562,10 +536,7 @@ pub fn account_not_found_suggestions(account: &str) -> Vec<FixSuggestion> {
 pub fn no_accounts_suggestions(provider: &str) -> Vec<FixSuggestion> {
     vec![FixSuggestion::new(
         vec![format!("caut auth login {}", provider)],
-        format!(
-            "No accounts are configured for {}. Set up authentication first.",
-            provider
-        ),
+        format!("No accounts are configured for {provider}. Set up authentication first."),
     )]
 }
 

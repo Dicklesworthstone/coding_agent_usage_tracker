@@ -64,7 +64,7 @@ pub struct IdentityFields {
 impl IdentityFields {
     /// Returns true if any identity field is present.
     #[must_use]
-    pub fn has_identity(&self) -> bool {
+    pub const fn has_identity(&self) -> bool {
         self.email.is_some()
             || self.user_id.is_some()
             || self.organization.is_some()
@@ -109,13 +109,13 @@ pub enum ChangeType {
 impl ChangeType {
     /// Returns true if this change should trigger a usage snapshot.
     #[must_use]
-    pub fn should_capture_snapshot(&self) -> bool {
+    pub const fn should_capture_snapshot(&self) -> bool {
         matches!(self, Self::AccountSwitch | Self::Created)
     }
 
     /// Returns a human-readable description.
     #[must_use]
-    pub fn description(&self) -> &'static str {
+    pub const fn description(&self) -> &'static str {
         match self {
             Self::NoChange => "no change",
             Self::TokenRefresh => "token refreshed",
@@ -142,6 +142,9 @@ impl CredentialHasher {
     /// Hash a credential file.
     ///
     /// Reads the file and extracts identity fields plus computes hashes.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be read or contains invalid JSON.
     pub fn hash_file(&self, path: &Path) -> Result<CredentialHashes> {
         let content = fs::read_to_string(path).map_err(|e| {
             CautError::Other(anyhow::anyhow!(
@@ -154,6 +157,9 @@ impl CredentialHasher {
     }
 
     /// Hash credential content (JSON string).
+    ///
+    /// # Errors
+    /// Returns an error if the content is not valid JSON.
     pub fn hash_content(&self, content: &str) -> Result<CredentialHashes> {
         // Parse JSON
         let json: serde_json::Value = serde_json::from_str(content)
@@ -221,10 +227,10 @@ impl CredentialHasher {
                 let old_identity = old.split(':').next().unwrap_or(old);
                 let new_identity = new.split(':').next().unwrap_or(new);
 
-                if old_identity != new_identity {
-                    ChangeType::AccountSwitch
-                } else {
+                if old_identity == new_identity {
                     ChangeType::TokenRefresh
+                } else {
+                    ChangeType::AccountSwitch
                 }
             }
         }
@@ -287,20 +293,18 @@ impl CredentialHasher {
         }
 
         // Try to extract from nested structures (e.g., id_token claims)
-        if !fields.has_identity() {
-            if let Some(token) = json.get("id_token").and_then(|v| v.as_str()) {
-                if let Some(claims) = self.decode_jwt_claims(token) {
-                    if fields.email.is_none() {
-                        fields.email = claims
-                            .get("email")
-                            .and_then(|v| v.as_str())
-                            .map(String::from);
-                    }
-                    if fields.user_id.is_none() {
-                        fields.user_id =
-                            claims.get("sub").and_then(|v| v.as_str()).map(String::from);
-                    }
-                }
+        if !fields.has_identity()
+            && let Some(token) = json.get("id_token").and_then(|v| v.as_str())
+            && let Some(claims) = self.decode_jwt_claims(token)
+        {
+            if fields.email.is_none() {
+                fields.email = claims
+                    .get("email")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+            }
+            if fields.user_id.is_none() {
+                fields.user_id = claims.get("sub").and_then(|v| v.as_str()).map(String::from);
             }
         }
 
@@ -308,6 +312,7 @@ impl CredentialHasher {
     }
 
     /// Compute a hash based on identity fields.
+    #[allow(clippy::unused_self)]
     fn compute_identity_hash(&self, fields: &IdentityFields) -> String {
         let mut hasher = Sha256::new();
 
@@ -372,6 +377,7 @@ impl CredentialHasher {
     }
 
     /// Check if a field is volatile (changes on token refresh).
+    #[allow(clippy::unused_self)]
     fn is_volatile_field(&self, key: &str) -> bool {
         matches!(
             key.to_lowercase().as_str(),
@@ -395,7 +401,10 @@ impl CredentialHasher {
     }
 
     /// Decode JWT claims (just the payload, no verification).
+    #[allow(clippy::unused_self)]
     fn decode_jwt_claims(&self, token: &str) -> Option<serde_json::Value> {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
             return None;
@@ -411,7 +420,6 @@ impl CredentialHasher {
         }
 
         // Decode base64
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
         let decoded = STANDARD.decode(&payload_std).ok()?;
         serde_json::from_slice(&decoded).ok()
     }
@@ -438,6 +446,7 @@ impl CredentialHashes {
 }
 
 #[cfg(test)]
+#[allow(clippy::similar_names)]
 mod tests {
     use super::*;
 

@@ -12,6 +12,9 @@ use crate::error::Result;
 pub use human::{HistoryDay, HistoryRenderOptions, render_history_chart};
 
 /// Render usage results.
+///
+/// # Errors
+/// Returns an error if the selected format's renderer fails (e.g., JSON serialization error).
 pub fn render_usage(
     results: &[ProviderPayload],
     format: OutputFormat,
@@ -26,6 +29,9 @@ pub fn render_usage(
 }
 
 /// Render cost results.
+///
+/// # Errors
+/// Returns an error if the selected format's renderer fails (e.g., JSON serialization error).
 pub fn render_cost(
     results: &[CostPayload],
     format: OutputFormat,
@@ -40,6 +46,9 @@ pub fn render_cost(
 }
 
 /// Render doctor report.
+///
+/// # Errors
+/// Returns an error if the selected format's renderer fails (e.g., JSON serialization error).
 pub fn render_doctor(
     report: &DoctorReport,
     format: OutputFormat,

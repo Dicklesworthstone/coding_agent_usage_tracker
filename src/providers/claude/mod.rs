@@ -211,15 +211,19 @@ struct ClaudeAccount {
 /// Fetch usage via OAuth API.
 ///
 /// Requires a valid OAuth token stored in the system keyring.
+///
+/// # Errors
+/// Returns an error if the HTTP client cannot be built, the request times out,
+/// the server returns a non-success status, or the response cannot be parsed.
 pub async fn fetch_oauth(token: &str) -> Result<UsageSnapshot> {
     let client = build_client(DEFAULT_TIMEOUT)?;
 
     // Make authenticated request to rate limit endpoint
-    let url = format!("{}/v1/rate_limits", API_BASE);
+    let url = format!("{API_BASE}/v1/rate_limits");
 
     let response = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("anthropic-version", "2023-06-01")
         .header("x-api-key", token)
         .send()
@@ -244,12 +248,16 @@ pub async fn fetch_oauth(token: &str) -> Result<UsageSnapshot> {
         .await
         .map_err(|e| CautError::ParseResponse(e.to_string()))?;
 
-    parse_api_response(data)
+    Ok(parse_api_response(&data))
 }
 
 /// Fetch usage via web scraping.
 ///
 /// This requires macOS with browser cookies available.
+///
+/// # Errors
+/// Returns an error if web scraping is not supported on the current platform
+/// or if the scraping operation fails.
 pub async fn fetch_web() -> Result<UsageSnapshot> {
     #[cfg(not(target_os = "macos"))]
     {
@@ -277,6 +285,10 @@ pub async fn fetch_web() -> Result<UsageSnapshot> {
 ///
 /// Calls the `claude` CLI to get rate limit information.
 /// Falls back to reading local config files for identity info.
+///
+/// # Errors
+/// Returns an error if no rate limit data can be obtained from the CLI
+/// or local config files.
 pub async fn fetch_cli() -> Result<UsageSnapshot> {
     // First check version to confirm CLI is working
     let version = get_cli_version().await.ok();
@@ -291,14 +303,14 @@ pub async fn fetch_cli() -> Result<UsageSnapshot> {
 
     // Try to get rate limit info via JSON output (unlikely to work - Claude CLI doesn't expose this)
     if let Ok(response) = try_json_rate_limit().await {
-        return parse_api_response(response);
+        return Ok(parse_api_response(&response));
     }
 
     // Try the /limits subcommand if available
-    if let Ok(output) = run_command(CLI_NAME, &["limits"], CLI_TIMEOUT).await {
-        if output.success() {
-            return parse_cli_limits_output(&output.stdout);
-        }
+    if let Ok(output) = run_command(CLI_NAME, &["limits"], CLI_TIMEOUT).await
+        && output.success()
+    {
+        return Ok(parse_cli_limits_output(&output.stdout));
     }
 
     // Fallback: Read identity from local config files
@@ -349,8 +361,9 @@ async fn try_json_rate_limit() -> Result<ClaudeRateLimitResponse> {
     })
 }
 
-/// Parse API response into UsageSnapshot.
-fn parse_api_response(response: ClaudeRateLimitResponse) -> Result<UsageSnapshot> {
+/// Parse API response into `UsageSnapshot`.
+#[allow(clippy::cast_precision_loss)] // rate limit values fit in f64
+fn parse_api_response(response: &ClaudeRateLimitResponse) -> UsageSnapshot {
     let now = Utc::now();
 
     let primary = response.rate_limit.as_ref().and_then(|rl| {
@@ -394,17 +407,17 @@ fn parse_api_response(response: ClaudeRateLimitResponse) -> Result<UsageSnapshot
         login_method: Some("oauth".to_string()),
     });
 
-    Ok(UsageSnapshot {
+    UsageSnapshot {
         primary,
         secondary,
         tertiary: None,
         updated_at: now,
         identity,
-    })
+    }
 }
 
 /// Parse CLI limits output (text format).
-fn parse_cli_limits_output(output: &str) -> Result<UsageSnapshot> {
+fn parse_cli_limits_output(output: &str) -> UsageSnapshot {
     let now = Utc::now();
 
     // Parse text output like:
@@ -424,19 +437,19 @@ fn parse_cli_limits_output(output: &str) -> Result<UsageSnapshot> {
                     reset_description: None,
                 });
             }
-        } else if line.contains("token") {
-            if let Some(pct) = extract_percent(&line) {
-                secondary = Some(RateWindow {
-                    used_percent: pct,
-                    window_minutes: None,
-                    resets_at: None,
-                    reset_description: None,
-                });
-            }
+        } else if line.contains("token")
+            && let Some(pct) = extract_percent(&line)
+        {
+            secondary = Some(RateWindow {
+                used_percent: pct,
+                window_minutes: None,
+                resets_at: None,
+                reset_description: None,
+            });
         }
     }
 
-    Ok(UsageSnapshot {
+    UsageSnapshot {
         primary,
         secondary,
         tertiary: None,
@@ -446,7 +459,7 @@ fn parse_cli_limits_output(output: &str) -> Result<UsageSnapshot> {
             account_organization: None,
             login_method: Some("cli".to_string()),
         }),
-    })
+    }
 }
 
 /// Extract percentage from a line like "55% used" or "(55%)".
@@ -479,7 +492,6 @@ async fn get_cli_version() -> Result<String> {
         // Parse version from output
         let version = output
             .stdout
-            .trim()
             .split_whitespace()
             .last()
             .unwrap_or("unknown")
@@ -500,11 +512,11 @@ async fn get_cli_version() -> Result<String> {
 /// Returns error if keyring access fails.
 pub fn store_oauth_token(token: &str) -> Result<()> {
     let entry = keyring::Entry::new("caut", "claude-oauth-token")
-        .map_err(|e| CautError::Config(format!("Keyring error: {}", e)))?;
+        .map_err(|e| CautError::Config(format!("Keyring error: {e}")))?;
 
     entry
         .set_password(token)
-        .map_err(|e| CautError::Config(format!("Failed to store token: {}", e)))
+        .map_err(|e| CautError::Config(format!("Failed to store token: {e}")))
 }
 
 /// Delete OAuth token from keyring.
@@ -514,11 +526,11 @@ pub fn store_oauth_token(token: &str) -> Result<()> {
 /// Returns error if keyring access fails.
 pub fn delete_oauth_token() -> Result<()> {
     let entry = keyring::Entry::new("caut", "claude-oauth-token")
-        .map_err(|e| CautError::Config(format!("Keyring error: {}", e)))?;
+        .map_err(|e| CautError::Config(format!("Keyring error: {e}")))?;
 
     entry
         .delete_credential()
-        .map_err(|e| CautError::Config(format!("Failed to delete token: {}", e)))
+        .map_err(|e| CautError::Config(format!("Failed to delete token: {e}")))
 }
 
 #[cfg(test)]
@@ -621,7 +633,7 @@ mod tests {
             }),
         };
 
-        let snapshot = parse_api_response(response).expect("snapshot");
+        let snapshot = parse_api_response(&response);
 
         // Primary (requests): 30 used out of 100 = 30%
         let primary = snapshot.primary.expect("primary");
@@ -647,7 +659,7 @@ mod tests {
             account: None,
         };
 
-        let snapshot = parse_api_response(response).expect("snapshot");
+        let snapshot = parse_api_response(&response);
         assert!(snapshot.primary.is_none());
         assert!(snapshot.secondary.is_none());
         assert!(snapshot.tertiary.is_none());
@@ -671,7 +683,7 @@ mod tests {
             account: None,
         };
 
-        let snapshot = parse_api_response(response).expect("snapshot");
+        let snapshot = parse_api_response(&response);
         let primary = snapshot.primary.expect("primary");
         assert!((primary.used_percent - 50.0).abs() < f64::EPSILON);
         assert!(snapshot.secondary.is_none());
@@ -691,7 +703,7 @@ mod tests {
             account: None,
         };
 
-        let snapshot = parse_api_response(response).expect("snapshot");
+        let snapshot = parse_api_response(&response);
         assert!(snapshot.primary.is_none());
         let secondary = snapshot.secondary.expect("secondary");
         assert!((secondary.used_percent - 75.0).abs() < f64::EPSILON);
@@ -711,7 +723,7 @@ mod tests {
             account: None,
         };
 
-        let snapshot = parse_api_response(response).expect("snapshot");
+        let snapshot = parse_api_response(&response);
         // Zero limits should result in None (division by zero protection)
         assert!(snapshot.primary.is_none());
         assert!(snapshot.secondary.is_none());
@@ -732,7 +744,7 @@ mod tests {
             account: None,
         };
 
-        let snapshot = parse_api_response(response).expect("snapshot");
+        let snapshot = parse_api_response(&response);
         let primary = snapshot.primary.expect("primary");
         let secondary = snapshot.secondary.expect("secondary");
         assert!((primary.used_percent - 100.0).abs() < f64::EPSILON);
@@ -753,7 +765,7 @@ mod tests {
             account: None,
         };
 
-        let snapshot = parse_api_response(response).expect("snapshot");
+        let snapshot = parse_api_response(&response);
         let primary = snapshot.primary.expect("primary");
         // Invalid timestamp should result in None
         assert!(primary.resets_at.is_none());
@@ -768,7 +780,7 @@ mod tests {
         let output =
             "Requests: 45/100 remaining (55% used)\nTokens: 90000/100000 remaining (10% used)";
 
-        let snapshot = parse_cli_limits_output(output).expect("snapshot");
+        let snapshot = parse_cli_limits_output(output);
 
         let primary = snapshot.primary.expect("primary");
         assert!((primary.used_percent - 55.0).abs() < f64::EPSILON);
@@ -781,7 +793,7 @@ mod tests {
     fn parse_cli_limits_output_empty() {
         let output = "";
 
-        let snapshot = parse_cli_limits_output(output).expect("snapshot");
+        let snapshot = parse_cli_limits_output(output);
         assert!(snapshot.primary.is_none());
         assert!(snapshot.secondary.is_none());
     }
@@ -790,7 +802,7 @@ mod tests {
     fn parse_cli_limits_output_only_requests() {
         let output = "Request limit: 75% used";
 
-        let snapshot = parse_cli_limits_output(output).expect("snapshot");
+        let snapshot = parse_cli_limits_output(output);
         let primary = snapshot.primary.expect("primary");
         assert!((primary.used_percent - 75.0).abs() < f64::EPSILON);
         assert!(snapshot.secondary.is_none());
@@ -800,7 +812,7 @@ mod tests {
     fn parse_cli_limits_output_only_tokens() {
         let output = "Token usage: 33.5% consumed";
 
-        let snapshot = parse_cli_limits_output(output).expect("snapshot");
+        let snapshot = parse_cli_limits_output(output);
         assert!(snapshot.primary.is_none());
         let secondary = snapshot.secondary.expect("secondary");
         assert!((secondary.used_percent - 33.5).abs() < f64::EPSILON);
@@ -810,7 +822,7 @@ mod tests {
     fn parse_cli_limits_output_case_insensitive() {
         let output = "REQUEST LIMIT: 25% used\nTOKEN LIMIT: 50% used";
 
-        let snapshot = parse_cli_limits_output(output).expect("snapshot");
+        let snapshot = parse_cli_limits_output(output);
         let primary = snapshot.primary.expect("primary");
         let secondary = snapshot.secondary.expect("secondary");
         assert!((primary.used_percent - 25.0).abs() < f64::EPSILON);
@@ -828,7 +840,7 @@ Token usage is at 45%
 Plan: Pro
 ";
 
-        let snapshot = parse_cli_limits_output(output).expect("snapshot");
+        let snapshot = parse_cli_limits_output(output);
         let primary = snapshot.primary.expect("primary");
         let secondary = snapshot.secondary.expect("secondary");
         assert!((primary.used_percent - 20.0).abs() < f64::EPSILON);
@@ -839,7 +851,7 @@ Plan: Pro
     fn parse_cli_limits_output_sets_identity() {
         let output = "Requests: 50% used";
 
-        let snapshot = parse_cli_limits_output(output).expect("snapshot");
+        let snapshot = parse_cli_limits_output(output);
         let identity = snapshot.identity.expect("identity");
         assert_eq!(identity.login_method.as_deref(), Some("cli"));
         assert!(identity.account_email.is_none());

@@ -26,7 +26,7 @@ pub struct EventHandler {
 impl EventHandler {
     /// Create a new event handler with the given tick rate.
     #[must_use]
-    pub fn new(tick_rate_ms: u64) -> Self {
+    pub const fn new(tick_rate_ms: u64) -> Self {
         Self {
             tick_rate: Duration::from_millis(tick_rate_ms),
         }
@@ -79,7 +79,7 @@ pub enum KeyAction {
 impl KeyAction {
     /// Parse a key event into an action.
     #[must_use]
-    pub fn from_key_event(key: KeyEvent) -> Self {
+    pub const fn from_key_event(key: KeyEvent) -> Self {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => Self::Quit,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Self::Quit,

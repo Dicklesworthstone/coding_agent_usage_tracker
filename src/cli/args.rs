@@ -1,7 +1,7 @@
 //! CLI argument definitions using clap.
 //!
-//! Matches CodexBar CLI semantics.
-//! See EXISTING_CODEXBAR_STRUCTURE.md section 2.
+//! Matches `CodexBar` CLI semantics.
+//! See `EXISTING_CODEXBAR_STRUCTURE.md` section 2.
 
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 #[command(name = "caut")]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -51,7 +52,7 @@ pub struct Cli {
 impl Cli {
     /// Resolve the effective output format.
     #[must_use]
-    pub fn effective_format(&self) -> OutputFormat {
+    pub const fn effective_format(&self) -> OutputFormat {
         if self.json {
             OutputFormat::Json
         } else {
@@ -198,6 +199,7 @@ impl std::fmt::Display for ExportFormat {
 
 /// Arguments for the `usage` command.
 #[derive(Parser, Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct UsageArgs {
     /// Provider to query (name, "both", or "all")
     #[arg(long, value_name = "PROVIDER")]
@@ -259,6 +261,10 @@ pub struct UsageArgs {
 
 impl UsageArgs {
     /// Validate argument combinations.
+    ///
+    /// # Errors
+    /// Returns an error if conflicting flags are used (e.g., `--all-accounts`
+    /// with `--account`) or if invalid values are provided (e.g., zero timeout).
     pub fn validate(&self) -> crate::error::Result<()> {
         use crate::error::CautError;
 
@@ -358,7 +364,7 @@ pub struct PromptArgs {
     #[arg(long, value_name = "SECONDS", default_value = "60")]
     pub cache_max_age: u64,
 
-    /// Strict freshness mode: show nothing if cache exceeds max_age.
+    /// Strict freshness mode: show nothing if cache exceeds `max_age`.
     /// Without this flag, stale data is shown with a staleness indicator (~/?).
     #[arg(long)]
     pub strict_freshness: bool,
@@ -409,7 +415,7 @@ pub struct SessionArgs {
 }
 
 impl DashboardArgs {
-    /// Convert to UsageArgs for the TUI runner.
+    /// Convert to `UsageArgs` for the TUI runner.
     #[must_use]
     pub fn to_usage_args(&self) -> UsageArgs {
         UsageArgs {
@@ -466,7 +472,7 @@ pub enum TokenAccountsCommand {
         provider: Option<String>,
     },
 
-    /// Convert between CodexBar and caut formats
+    /// Convert between `CodexBar` and caut formats
     Convert {
         /// Source format
         #[arg(long, value_name = "FORMAT")]

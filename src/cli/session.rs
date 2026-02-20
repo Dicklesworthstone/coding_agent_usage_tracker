@@ -95,6 +95,10 @@ pub struct SessionTotals {
 }
 
 /// Execute the session command.
+///
+/// # Errors
+/// Returns an error if session log discovery fails, log parsing fails for all
+/// sessions, or output serialization fails.
 pub async fn execute(
     args: &SessionArgs,
     format: OutputFormat,
@@ -109,8 +113,7 @@ pub async fn execute(
         let start_of_day = now
             .date_naive()
             .and_hms_opt(0, 0, 0)
-            .map(|dt| dt.and_local_timezone(now.timezone()).single())
-            .flatten()
+            .and_then(|dt| dt.and_local_timezone(now.timezone()).single())
             .map(|dt| dt.with_timezone(&Utc));
         (start_of_day, None)
     } else {
@@ -136,10 +139,10 @@ pub async fn execute(
             match parse_log(&log) {
                 Ok(usage) => {
                     // Filter by session ID if specified
-                    if let Some(ref id) = args.id {
-                        if !usage.session_id.contains(id) {
-                            continue;
-                        }
+                    if let Some(ref id) = args.id
+                        && !usage.session_id.contains(id)
+                    {
+                        continue;
                     }
                     sessions.push(SessionSummary::from_usage(&usage, provider));
                 }
@@ -151,7 +154,7 @@ pub async fn execute(
     }
 
     // Sort by end time (most recent first)
-    sessions.sort_by(|a, b| b.ended_at.cmp(&a.ended_at));
+    sessions.sort_by_key(|b| std::cmp::Reverse(b.ended_at));
 
     // Apply limit for list mode
     if args.list && sessions.len() > args.limit {
@@ -215,7 +218,9 @@ fn calculate_totals(sessions: &[SessionSummary]) -> SessionTotals {
     let total_duration_minutes: i64 = sessions.iter().filter_map(|s| s.duration_minutes).sum();
 
     let cost_per_hour_usd = if total_duration_minutes > 0 {
-        Some(total_cost_usd / (total_duration_minutes as f64 / 60.0))
+        #[allow(clippy::cast_precision_loss)] // duration in minutes fits in f64
+        let hours = total_duration_minutes as f64 / 60.0;
+        Some(total_cost_usd / hours)
     } else {
         None
     };
@@ -250,9 +255,9 @@ fn render_human(output: &SessionOutput, no_color: bool) -> String {
     };
 
     if no_color {
-        writeln!(buf, "=== {} ===\n", title).ok();
+        writeln!(buf, "=== {title} ===\n").ok();
     } else {
-        writeln!(buf, "\x1b[1;36m=== {} ===\x1b[0m\n", title).ok();
+        writeln!(buf, "\x1b[1;36m=== {title} ===\x1b[0m\n").ok();
     }
 
     // Individual sessions
@@ -270,7 +275,7 @@ fn render_human(output: &SessionOutput, no_color: bool) -> String {
     if !output.errors.is_empty() {
         writeln!(buf, "\nWarnings:").ok();
         for err in &output.errors {
-            writeln!(buf, "  - {}", err).ok();
+            writeln!(buf, "  - {err}").ok();
         }
     }
 
@@ -326,9 +331,9 @@ fn render_session(buf: &mut String, session: &SessionSummary, no_color: bool) {
             let hours = duration / 60;
             let mins = duration % 60;
             if hours > 0 {
-                writeln!(buf, " ({}h {}m)", hours, mins).ok();
+                writeln!(buf, " ({hours}h {mins}m)").ok();
             } else {
-                writeln!(buf, " ({}m)", mins).ok();
+                writeln!(buf, " ({mins}m)").ok();
             }
         } else {
             writeln!(buf).ok();
@@ -356,12 +361,14 @@ fn render_session(buf: &mut String, session: &SessionSummary, no_color: bool) {
 
     // Tokens
     let total_tokens = session.input_tokens + session.output_tokens;
+    #[allow(clippy::cast_precision_loss)] // token counts fit in f64
+    let total_tokens_k = total_tokens as f64 / 1000.0;
     writeln!(
         buf,
         "  Tokens: {}K in / {}K out ({:.0}K total)",
         session.input_tokens / 1000,
         session.output_tokens / 1000,
-        total_tokens as f64 / 1000.0
+        total_tokens_k
     )
     .ok();
 
@@ -386,7 +393,7 @@ fn render_session(buf: &mut String, session: &SessionSummary, no_color: bool) {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(project);
-        writeln!(buf, "  Project: {}", project_name).ok();
+        writeln!(buf, "  Project: {project_name}").ok();
     }
 }
 
@@ -403,16 +410,18 @@ fn render_totals(buf: &mut String, totals: &SessionTotals, no_color: bool) {
     writeln!(buf, "  Total Cost: ${:.2}", totals.total_cost_usd).ok();
 
     let total_tokens = totals.total_input_tokens + totals.total_output_tokens;
-    writeln!(buf, "  Total Tokens: {:.0}K", total_tokens as f64 / 1000.0).ok();
+    #[allow(clippy::cast_precision_loss)] // token counts fit in f64
+    let total_tokens_k = total_tokens as f64 / 1000.0;
+    writeln!(buf, "  Total Tokens: {total_tokens_k:.0}K").ok();
 
     if totals.total_duration_minutes > 0 {
         let hours = totals.total_duration_minutes / 60;
         let mins = totals.total_duration_minutes % 60;
-        writeln!(buf, "  Total Time: {}h {}m", hours, mins).ok();
+        writeln!(buf, "  Total Time: {hours}h {mins}m").ok();
     }
 
     if let Some(cost_per_hour) = totals.cost_per_hour_usd {
-        writeln!(buf, "  Avg Cost/Hour: ${:.2}", cost_per_hour).ok();
+        writeln!(buf, "  Avg Cost/Hour: ${cost_per_hour:.2}").ok();
     }
 }
 
@@ -449,8 +458,7 @@ fn render_markdown(output: &SessionOutput) -> String {
     for session in &output.sessions {
         let duration = session
             .duration_minutes
-            .map(|m| format!("{}m", m))
-            .unwrap_or_else(|| "-".to_string());
+            .map_or_else(|| "-".to_string(), |m| format!("{m}m"));
         let tokens = format!("{}K", (session.input_tokens + session.output_tokens) / 1000);
 
         writeln!(
@@ -471,12 +479,10 @@ fn render_markdown(output: &SessionOutput) -> String {
         writeln!(buf, "\n## Totals\n").ok();
         writeln!(buf, "- **Sessions**: {}", totals.session_count).ok();
         writeln!(buf, "- **Total Cost**: ${:.2}", totals.total_cost_usd).ok();
-        writeln!(
-            buf,
-            "- **Total Tokens**: {:.0}K",
-            (totals.total_input_tokens + totals.total_output_tokens) as f64 / 1000.0
-        )
-        .ok();
+        #[allow(clippy::cast_precision_loss)] // token counts fit in f64
+        let total_tokens_k =
+            (totals.total_input_tokens + totals.total_output_tokens) as f64 / 1000.0;
+        writeln!(buf, "- **Total Tokens**: {total_tokens_k:.0}K").ok();
         if totals.total_duration_minutes > 0 {
             writeln!(
                 buf,
@@ -486,7 +492,7 @@ fn render_markdown(output: &SessionOutput) -> String {
             .ok();
         }
         if let Some(cost_per_hour) = totals.cost_per_hour_usd {
-            writeln!(buf, "- **Cost/Hour**: ${:.2}", cost_per_hour).ok();
+            writeln!(buf, "- **Cost/Hour**: ${cost_per_hour:.2}").ok();
         }
     }
 
@@ -536,7 +542,7 @@ mod tests {
         let summary1 = SessionSummary::from_usage(&usage, Provider::Claude);
         let summary2 = SessionSummary::from_usage(&usage, Provider::Codex);
 
-        let totals = calculate_totals(&[summary1.clone(), summary2.clone()]);
+        let totals = calculate_totals(&[summary1, summary2]);
 
         assert_eq!(totals.session_count, 2);
         assert_eq!(totals.total_input_tokens, 200_000);
@@ -563,7 +569,7 @@ mod tests {
     fn render_markdown_format() {
         let usage = make_test_usage();
         let summary = SessionSummary::from_usage(&usage, Provider::Claude);
-        let totals = calculate_totals(&[summary.clone()]);
+        let totals = calculate_totals(std::slice::from_ref(&summary));
 
         let output = SessionOutput {
             schema_version: "caut.v1",

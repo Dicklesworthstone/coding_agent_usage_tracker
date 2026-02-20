@@ -1,6 +1,6 @@
 //! Usage history schema and migrations.
 //!
-//! This module defines the SQLite schema for usage history snapshots and
+//! This module defines the `SQLite` schema for usage history snapshots and
 //! provides migration and retention helpers. The history storage layer will
 //! build on top of this schema.
 
@@ -30,6 +30,10 @@ pub const DEFAULT_RETENTION_DAYS: i64 = 90;
 /// Run schema migrations for the usage history database.
 ///
 /// Returns the latest schema version applied.
+///
+/// # Errors
+/// Returns an error if creating the migrations table, reading the schema version,
+/// or applying any migration fails.
 pub fn run_migrations(conn: &mut Connection) -> Result<i32> {
     ensure_schema_migrations_table(conn)?;
 
@@ -48,6 +52,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<i32> {
 /// Delete snapshots older than the retention window.
 ///
 /// Returns the number of rows deleted.
+///
+/// # Errors
+/// Returns an error if `retention_days` is non-positive, the DELETE query fails,
+/// or the post-cleanup VACUUM fails.
 pub fn cleanup_old_snapshots(conn: &Connection, retention_days: i64) -> Result<usize> {
     if retention_days <= 0 {
         return Err(CautError::Config(

@@ -20,6 +20,10 @@ pub(crate) struct UsageResults {
 }
 
 /// Execute the usage command.
+///
+/// # Errors
+/// Returns an error if argument validation fails, provider fetching fails,
+/// or output rendering encounters an error.
 pub async fn execute(
     args: &UsageArgs,
     format: OutputFormat,
@@ -31,10 +35,10 @@ pub async fn execute(
 
     // Prune history on startup
     let paths = AppPaths::new();
-    if let Ok(store) = HistoryStore::open(&paths.history_db_file()) {
-        if let Err(e) = store.maybe_prune(&RetentionPolicy::default()) {
-            tracing::warn!("Failed to prune history: {}", e);
-        }
+    if let Ok(store) = HistoryStore::open(&paths.history_db_file())
+        && let Err(e) = store.maybe_prune(&RetentionPolicy::default())
+    {
+        tracing::warn!("Failed to prune history: {}", e);
     }
 
     // TUI mode implies watch mode
@@ -106,10 +110,10 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
         match outcome.result {
             Ok(snapshot) => {
                 // Record to history
-                if let Ok(store) = HistoryStore::open(&paths.history_db_file()) {
-                    if let Err(e) = store.record_snapshot(&snapshot, &outcome.provider) {
-                        tracing::warn!("Failed to record snapshot: {}", e);
-                    }
+                if let Ok(store) = HistoryStore::open(&paths.history_db_file())
+                    && let Err(e) = store.record_snapshot(&snapshot, &outcome.provider)
+                {
+                    tracing::warn!("Failed to record snapshot: {}", e);
                 }
 
                 // Get status if requested
@@ -180,10 +184,10 @@ pub(crate) fn render_usage_results(
     match format {
         OutputFormat::Human => {
             let output = human::render_usage(&results.payloads, no_color)?;
-            println!("{}", output);
+            println!("{output}");
 
             for error in &results.errors {
-                eprintln!("Error: {}", error);
+                eprintln!("Error: {error}");
             }
         }
         OutputFormat::Json => {
@@ -193,16 +197,16 @@ pub(crate) fn render_usage_results(
             } else {
                 robot::render_json(&robot_output)?
             };
-            println!("{}", output);
+            println!("{output}");
         }
         OutputFormat::Md => {
             let output = robot::render_markdown_usage(&results.payloads)?;
-            println!("{}", output);
+            println!("{output}");
 
             if !results.errors.is_empty() {
                 println!("\n## Errors\n");
                 for error in &results.errors {
-                    println!("- {}", error);
+                    println!("- {error}");
                 }
             }
         }

@@ -1,5 +1,7 @@
 //! Usage bar component for displaying percentage usage.
 
+use std::fmt::Write;
+
 use crate::rich::{Renderable, ThemeConfig, parse_color};
 use rich_rust::prelude::*;
 
@@ -17,7 +19,7 @@ pub struct UsageBar {
 impl UsageBar {
     /// Create a new usage bar with the given percentage (0-100).
     #[must_use]
-    pub fn new(percentage: f64) -> Self {
+    pub const fn new(percentage: f64) -> Self {
         Self {
             percentage: percentage.clamp(0.0, 100.0),
             width: 20,
@@ -35,7 +37,7 @@ impl UsageBar {
 
     /// Set whether to show the percentage value.
     #[must_use]
-    pub fn show_percentage(mut self, show: bool) -> Self {
+    pub const fn show_percentage(mut self, show: bool) -> Self {
         self.show_percentage = show;
         self
     }
@@ -60,11 +62,14 @@ impl UsageBar {
 
         // Label
         if let Some(label) = &self.label {
-            segments.push(Segment::styled(format!("{}: ", label), theme.muted.clone()));
+            segments.push(Segment::styled(format!("{label}: "), theme.muted.clone()));
         }
 
         // Calculate fill
-        let filled = ((self.percentage / 100.0) * self.width as f64).round() as usize;
+        #[allow(clippy::cast_precision_loss)] // width is small
+        let width_f = self.width as f64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // percentage is 0-100
+        let filled = ((self.percentage / 100.0) * width_f).round() as usize;
         let empty = self.width.saturating_sub(filled);
 
         // Bar characters
@@ -101,7 +106,10 @@ impl UsageBar {
 
     /// Render as plain ASCII.
     fn render_ascii(&self) -> String {
-        let filled = ((self.percentage / 100.0) * self.width as f64).round() as usize;
+        #[allow(clippy::cast_precision_loss)] // width is small
+        let width_f = self.width as f64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // percentage is 0-100
+        let filled = ((self.percentage / 100.0) * width_f).round() as usize;
         let empty = self.width.saturating_sub(filled);
 
         let bar = format!("[{}{}]", "#".repeat(filled), "-".repeat(empty));
@@ -116,7 +124,7 @@ impl UsageBar {
         result.push_str(&bar);
 
         if self.show_percentage {
-            result.push_str(&format!(" {:>5.1}%", self.percentage));
+            let _ = write!(result, " {:>5.1}%", self.percentage);
         }
 
         result
@@ -125,7 +133,10 @@ impl UsageBar {
 
 impl Renderable for UsageBar {
     fn render(&self) -> String {
-        let filled = ((self.percentage / 100.0) * self.width as f64).round() as usize;
+        #[allow(clippy::cast_precision_loss)] // width is small
+        let width_f = self.width as f64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // percentage is 0-100
+        let filled = ((self.percentage / 100.0) * width_f).round() as usize;
         let empty = self.width.saturating_sub(filled);
 
         let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
@@ -140,7 +151,7 @@ impl Renderable for UsageBar {
         result.push_str(&bar);
 
         if self.show_percentage {
-            result.push_str(&format!(" {:>5.1}%", self.percentage));
+            let _ = write!(result, " {:>5.1}%", self.percentage);
         }
 
         result
@@ -192,10 +203,10 @@ mod tests {
         let bar = UsageBar::new(50.0).width(10);
         let plain = bar.render_plain();
         assert_no_ansi(&plain);
-        assert!(plain.contains("["));
-        assert!(plain.contains("]"));
-        assert!(plain.contains("#"));
-        assert!(plain.contains("-"));
+        assert!(plain.contains('['));
+        assert!(plain.contains(']'));
+        assert!(plain.contains('#'));
+        assert!(plain.contains('-'));
     }
 
     #[test]

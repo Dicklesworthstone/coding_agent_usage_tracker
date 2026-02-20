@@ -24,7 +24,7 @@ impl ErrorPanel {
         }
     }
 
-    /// Create an error panel from a CautError.
+    /// Create an error panel from a `CautError`.
     #[must_use]
     pub fn from_error(err: &crate::error::CautError) -> Self {
         let mut panel = Self::new(err.to_string());
@@ -38,7 +38,7 @@ impl ErrorPanel {
             }
             // Add any commands as suggestions
             for cmd in &fix_suggestion.commands {
-                panel = panel.with_suggestion(format!("Run: {}", cmd));
+                panel = panel.with_suggestion(format!("Run: {cmd}"));
             }
         }
 
@@ -173,7 +173,7 @@ impl Renderable for ErrorPanel {
             lines.push(String::new());
             lines.push("Suggestions:".to_string());
             for suggestion in &self.suggestions {
-                lines.push(format!("  💡 {}", suggestion));
+                lines.push(format!("  💡 {suggestion}"));
             }
         }
 
@@ -201,7 +201,7 @@ impl Renderable for ErrorPanel {
             lines.push(String::new());
             lines.push("Suggestions:".to_string());
             for suggestion in &self.suggestions {
-                lines.push(format!("  * {}", suggestion));
+                lines.push(format!("  * {suggestion}"));
             }
         }
 
@@ -264,7 +264,7 @@ mod tests {
         let plain = panel.render_plain();
         assert_no_ansi(&plain);
         assert!(plain.contains("[X]"));
-        assert!(plain.contains("*"));
+        assert!(plain.contains('*'));
     }
 
     #[test]

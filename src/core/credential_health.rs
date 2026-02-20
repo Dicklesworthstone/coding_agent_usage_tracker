@@ -3,6 +3,7 @@
 //! Provides proactive detection of expiring, expired, or invalid credentials
 //! to warn users before authentication failures occur.
 
+use std::fmt::Write;
 use std::path::Path;
 use std::time::Duration;
 
@@ -56,7 +57,7 @@ pub enum JwtHealth {
 impl JwtHealth {
     /// Returns true if the token needs attention (expiring soon, expired, or invalid).
     #[must_use]
-    pub fn needs_attention(&self) -> bool {
+    pub const fn needs_attention(&self) -> bool {
         matches!(
             self,
             Self::ExpiringSoon { .. } | Self::Expired { .. } | Self::Invalid { .. }
@@ -65,7 +66,7 @@ impl JwtHealth {
 
     /// Returns true if the token is still valid (not expired).
     #[must_use]
-    pub fn is_valid(&self) -> bool {
+    pub const fn is_valid(&self) -> bool {
         matches!(
             self,
             Self::Valid { .. }
@@ -77,7 +78,7 @@ impl JwtHealth {
 
     /// Returns the time until expiration, if known.
     #[must_use]
-    pub fn expires_in(&self) -> Option<Duration> {
+    pub const fn expires_in(&self) -> Option<Duration> {
         match self {
             Self::Valid { expires_in, .. }
             | Self::ExpiringToday { expires_in, .. }
@@ -116,7 +117,7 @@ impl JwtHealth {
 
     /// Returns the severity level (for output formatting).
     #[must_use]
-    pub fn severity(&self) -> HealthSeverity {
+    pub const fn severity(&self) -> HealthSeverity {
         match self {
             Self::Valid { .. } | Self::NoExpiration => HealthSeverity::Ok,
             Self::ExpiringToday { .. } => HealthSeverity::Warning,
@@ -142,7 +143,7 @@ pub enum HealthSeverity {
 impl HealthSeverity {
     /// Returns an icon for the severity level.
     #[must_use]
-    pub fn icon(&self) -> &'static str {
+    pub const fn icon(&self) -> &'static str {
         match self {
             Self::Ok => "✓",
             Self::Warning => "⚠",
@@ -153,7 +154,7 @@ impl HealthSeverity {
 
     /// Returns a color name for the severity level.
     #[must_use]
-    pub fn color(&self) -> &'static str {
+    pub const fn color(&self) -> &'static str {
         match self {
             Self::Ok => "green",
             Self::Warning => "yellow",
@@ -212,44 +213,41 @@ impl JwtHealthChecker {
         };
 
         // Check expiration
-        match claims.exp {
-            Some(exp_timestamp) => {
-                let now = Utc::now().timestamp();
-                let remaining_secs = exp_timestamp - now;
+        claims.exp.map_or(JwtHealth::NoExpiration, |exp_timestamp| {
+            let now = Utc::now().timestamp();
+            let remaining_secs = exp_timestamp - now;
 
-                if remaining_secs < 0 {
-                    // Token has expired
-                    let expired_at =
-                        DateTime::from_timestamp(exp_timestamp, 0).unwrap_or_else(Utc::now);
-                    JwtHealth::Expired { expired_at }
+            if remaining_secs < 0 {
+                // Token has expired
+                let expired_at =
+                    DateTime::from_timestamp(exp_timestamp, 0).unwrap_or_else(Utc::now);
+                JwtHealth::Expired { expired_at }
+            } else {
+                let expires_in = Duration::from_secs(remaining_secs.unsigned_abs());
+                let expires_at =
+                    DateTime::from_timestamp(exp_timestamp, 0).unwrap_or_else(Utc::now);
+
+                if remaining_secs < 3600 {
+                    // Expires within 1 hour
+                    JwtHealth::ExpiringSoon {
+                        expires_in,
+                        expires_at,
+                    }
+                } else if remaining_secs < 86400 {
+                    // Expires within 24 hours
+                    JwtHealth::ExpiringToday {
+                        expires_in,
+                        expires_at,
+                    }
                 } else {
-                    let expires_in = Duration::from_secs(remaining_secs.unsigned_abs());
-                    let expires_at =
-                        DateTime::from_timestamp(exp_timestamp, 0).unwrap_or_else(Utc::now);
-
-                    if remaining_secs < 3600 {
-                        // Expires within 1 hour
-                        JwtHealth::ExpiringSoon {
-                            expires_in,
-                            expires_at,
-                        }
-                    } else if remaining_secs < 86400 {
-                        // Expires within 24 hours
-                        JwtHealth::ExpiringToday {
-                            expires_in,
-                            expires_at,
-                        }
-                    } else {
-                        // Valid with time to spare
-                        JwtHealth::Valid {
-                            expires_in,
-                            expires_at,
-                        }
+                    // Valid with time to spare
+                    JwtHealth::Valid {
+                        expires_in,
+                        expires_at,
                     }
                 }
             }
-            None => JwtHealth::NoExpiration,
-        }
+        })
     }
 
     /// Check multiple tokens and return the worst health status.
@@ -266,7 +264,7 @@ impl JwtHealthChecker {
                 JwtHealth::NoExpiration => 1,
                 JwtHealth::Valid { .. } => 0,
             })
-            .unwrap_or(JwtHealth::Invalid {
+            .unwrap_or_else(|| JwtHealth::Invalid {
                 reason: "no tokens provided".to_string(),
             })
     }
@@ -316,7 +314,9 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
             break;
         }
         let idx = ALPHABET.iter().position(|&c| c == byte)?;
-        buffer = (buffer << 6) | (idx as u32);
+        #[allow(clippy::cast_possible_truncation)] // index into 64-element table always fits u32
+        let idx_u32 = idx as u32;
+        buffer = (buffer << 6) | idx_u32;
         bits += 6;
 
         if bits >= 8 {
@@ -346,7 +346,7 @@ pub struct OAuthHealth {
 impl OAuthHealth {
     /// Create OAuth health with only an access token.
     #[must_use]
-    pub fn access_only(access: JwtHealth) -> Self {
+    pub const fn access_only(access: JwtHealth) -> Self {
         Self {
             access,
             refresh: None,
@@ -356,7 +356,7 @@ impl OAuthHealth {
 
     /// Create OAuth health with both access and refresh tokens.
     #[must_use]
-    pub fn with_refresh(access: JwtHealth, refresh: JwtHealth) -> Self {
+    pub const fn with_refresh(access: JwtHealth, refresh: JwtHealth) -> Self {
         let can_refresh = refresh.is_valid();
         Self {
             access,
@@ -388,7 +388,7 @@ impl OAuthHealth {
             || self
                 .refresh
                 .as_ref()
-                .map_or(false, JwtHealth::needs_attention)
+                .is_some_and(JwtHealth::needs_attention)
     }
 
     /// Returns a description of the credential health.
@@ -396,7 +396,7 @@ impl OAuthHealth {
     pub fn description(&self) -> String {
         let mut desc = format!("access token: {}", self.access.description());
         if let Some(ref refresh) = self.refresh {
-            desc.push_str(&format!(", refresh token: {}", refresh.description()));
+            let _ = write!(desc, ", refresh token: {}", refresh.description());
         }
         if self.can_refresh {
             desc.push_str(" (can refresh)");
@@ -471,7 +471,7 @@ pub enum CredentialType {
 impl CredentialType {
     /// Returns a display name for the credential type.
     #[must_use]
-    pub fn display_name(&self) -> &'static str {
+    pub const fn display_name(&self) -> &'static str {
         match self {
             Self::OAuth => "OAuth token",
             Self::ApiKey => "API key",
@@ -563,6 +563,7 @@ impl CredentialHealth {
 /// Check OAuth credentials from a JSON auth file.
 ///
 /// The file is expected to have `access_token`, `id_token`, or `refresh_token` fields.
+#[must_use]
 pub fn check_oauth_file(path: &Path) -> CredentialHealth {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -573,8 +574,10 @@ pub fn check_oauth_file(path: &Path) -> CredentialHealth {
 }
 
 /// Check OAuth credentials from JSON content.
+#[must_use]
 pub fn check_oauth_json(json: &str) -> CredentialHealth {
     #[derive(Deserialize)]
+    #[allow(clippy::struct_field_names)]
     struct OAuthTokens {
         #[serde(default)]
         access_token: Option<String>,
@@ -631,18 +634,17 @@ pub enum OverallHealth {
 impl OverallHealth {
     /// Returns the severity level for this health status.
     #[must_use]
-    pub fn severity(&self) -> HealthSeverity {
+    pub const fn severity(&self) -> HealthSeverity {
         match self {
             Self::Healthy => HealthSeverity::Ok,
-            Self::ExpiringSoon => HealthSeverity::Warning,
+            Self::ExpiringSoon | Self::Unknown => HealthSeverity::Warning,
             Self::Expired | Self::Missing => HealthSeverity::Critical,
-            Self::Unknown => HealthSeverity::Warning,
         }
     }
 
     /// Returns an icon for this health status.
     #[must_use]
-    pub fn icon(&self) -> &'static str {
+    pub const fn icon(&self) -> &'static str {
         self.severity().icon()
     }
 }
@@ -659,7 +661,7 @@ pub struct SourceHealth {
 impl SourceHealth {
     /// Returns true if the source is expired.
     #[must_use]
-    pub fn is_expired(&self) -> bool {
+    pub const fn is_expired(&self) -> bool {
         match &self.health {
             CredentialHealth::OAuth(oauth) => matches!(oauth.access, JwtHealth::Expired { .. }),
             CredentialHealth::Jwt(jwt) => matches!(jwt, JwtHealth::Expired { .. }),
@@ -670,7 +672,7 @@ impl SourceHealth {
 
     /// Returns true if the source is expiring soon.
     #[must_use]
-    pub fn is_expiring_soon(&self) -> bool {
+    pub const fn is_expiring_soon(&self) -> bool {
         match &self.health {
             CredentialHealth::OAuth(oauth) => {
                 matches!(
@@ -716,7 +718,7 @@ pub struct ProviderAuthHealth {
 impl ProviderAuthHealth {
     /// Returns true if any credentials need attention.
     #[must_use]
-    pub fn needs_attention(&self) -> bool {
+    pub const fn needs_attention(&self) -> bool {
         !matches!(self.overall, OverallHealth::Healthy)
     }
 
@@ -736,8 +738,7 @@ impl ProviderAuthHealth {
                     .sources
                     .iter()
                     .find(|s| s.is_expiring_soon())
-                    .map(|s| s.health.description())
-                    .unwrap_or_else(|| "expiring soon".to_string());
+                    .map_or_else(|| "expiring soon".to_string(), |s| s.health.description());
                 Some(format!("Auth {expiring_desc}. Consider re-authenticating."))
             }
             OverallHealth::Missing => Some(format!(
@@ -773,10 +774,10 @@ impl AuthHealthAggregator {
     pub fn check_provider(&self, provider: Provider) -> ProviderAuthHealth {
         let sources = self.find_and_check_sources(provider);
         let overall = self.aggregate_health(&sources);
-        let recommended_action = if overall != OverallHealth::Healthy {
-            Some(provider.auth_suggestion().to_string())
-        } else {
+        let recommended_action = if overall == OverallHealth::Healthy {
             None
+        } else {
+            Some(provider.auth_suggestion().to_string())
         };
 
         ProviderAuthHealth {
@@ -788,20 +789,21 @@ impl AuthHealthAggregator {
     }
 
     /// Find and check all credential sources for a provider.
+    #[allow(clippy::unused_self)]
     fn find_and_check_sources(&self, provider: Provider) -> Vec<SourceHealth> {
         let mut sources = Vec::new();
 
         // Check the primary credentials file if it exists
-        if let Some(cred_path) = provider.credentials_path() {
-            if let Some(home) = dirs::home_dir() {
-                let full_path = home.join(cred_path);
-                if full_path.exists() {
-                    let health = check_oauth_file(&full_path);
-                    sources.push(SourceHealth {
-                        source_type: "oauth".to_string(),
-                        health,
-                    });
-                }
+        if let Some(cred_path) = provider.credentials_path()
+            && let Some(home) = dirs::home_dir()
+        {
+            let full_path = home.join(cred_path);
+            if full_path.exists() {
+                let health = check_oauth_file(&full_path);
+                sources.push(SourceHealth {
+                    source_type: "oauth".to_string(),
+                    health,
+                });
             }
         }
 
@@ -817,6 +819,7 @@ impl AuthHealthAggregator {
     }
 
     /// Aggregate health from all sources into overall status.
+    #[allow(clippy::unused_self)]
     fn aggregate_health(&self, sources: &[SourceHealth]) -> OverallHealth {
         // Empty sources means missing
         if sources.is_empty() {
@@ -830,10 +833,6 @@ impl AuthHealthAggregator {
         let has_expired = sources.iter().any(SourceHealth::is_expired);
         let has_expiring = sources.iter().any(SourceHealth::is_expiring_soon);
         let all_valid = sources.iter().all(SourceHealth::is_valid);
-        let has_check_failed = sources
-            .iter()
-            .any(|s| matches!(s.health, CredentialHealth::CheckFailed(_)));
-
         if has_missing {
             OverallHealth::Missing
         } else if has_expired {
@@ -842,8 +841,6 @@ impl AuthHealthAggregator {
             OverallHealth::ExpiringSoon
         } else if all_valid {
             OverallHealth::Healthy
-        } else if has_check_failed {
-            OverallHealth::Unknown
         } else {
             OverallHealth::Unknown
         }
@@ -896,9 +893,9 @@ mod tests {
         let mut i = 0;
 
         while i < bytes.len() {
-            let b0 = bytes[i] as u32;
-            let b1 = bytes.get(i + 1).map_or(0, |&b| b as u32);
-            let b2 = bytes.get(i + 2).map_or(0, |&b| b as u32);
+            let b0 = u32::from(bytes[i]);
+            let b1 = bytes.get(i + 1).map_or(0, |&b| u32::from(b));
+            let b2 = bytes.get(i + 2).map_or(0, |&b| u32::from(b));
 
             let triple = (b0 << 16) | (b1 << 8) | b2;
 
@@ -1128,10 +1125,7 @@ mod tests {
     fn check_oauth_json_valid_tokens() {
         let access = make_jwt_with_exp(86400);
         let refresh = make_jwt_with_exp(86400 * 30);
-        let json = format!(
-            r#"{{"access_token":"{}","refresh_token":"{}"}}"#,
-            access, refresh
-        );
+        let json = format!(r#"{{"access_token":"{access}","refresh_token":"{refresh}"}}"#);
 
         let health = check_oauth_json(&json);
         assert!(matches!(health, CredentialHealth::OAuth(_)));
@@ -1141,7 +1135,7 @@ mod tests {
     #[test]
     fn check_oauth_json_id_token_fallback() {
         let id_token = make_jwt_with_exp(86400);
-        let json = format!(r#"{{"id_token":"{}"}}"#, id_token);
+        let json = format!(r#"{{"id_token":"{id_token}"}}"#);
 
         let health = check_oauth_json(&json);
         assert!(matches!(health, CredentialHealth::OAuth(_)));

@@ -91,7 +91,7 @@ impl std::fmt::Display for ErrorCategory {
 // Exit Codes
 // =============================================================================
 
-/// Exit codes matching CodexBar CLI semantics.
+/// Exit codes matching `CodexBar` CLI semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ExitCode {
@@ -109,7 +109,7 @@ pub enum ExitCode {
 
 impl From<ExitCode> for i32 {
     fn from(code: ExitCode) -> Self {
-        code as i32
+        code as Self
     }
 }
 
@@ -234,7 +234,7 @@ pub enum CautError {
         source_type: String,
     },
 
-    /// Provider CLI not found (legacy - prefer CliNotFound).
+    /// Provider CLI not found (legacy - prefer `CliNotFound`).
     #[error("provider CLI not found: {0}")]
     ProviderNotFound(String),
 
@@ -290,7 +290,7 @@ pub enum CautError {
     // ==========================================================================
     // Network errors (Category: Network, legacy)
     // ==========================================================================
-    /// Request timeout (legacy - prefer TimeoutWithProvider).
+    /// Request timeout (legacy - prefer `TimeoutWithProvider`).
     #[error("request timeout after {0} seconds")]
     Timeout(u64),
 
@@ -318,7 +318,7 @@ pub enum CautError {
 }
 
 impl CautError {
-    /// Map error to exit code following CodexBar semantics.
+    /// Map error to exit code following `CodexBar` semantics.
     #[must_use]
     pub const fn exit_code(&self) -> ExitCode {
         match self {
@@ -551,6 +551,7 @@ impl CautError {
     /// }
     /// ```
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn fix_suggestions(&self) -> Vec<FixSuggestion> {
         match self {
             // Authentication errors
@@ -573,7 +574,7 @@ impl CautError {
             Self::Network(msg) => {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
-                    format!("Network error: {}. Check your internet connection.", msg),
+                    format!("Network error: {msg}. Check your internet connection."),
                 )]
             }
 
@@ -592,7 +593,7 @@ impl CautError {
             Self::Config(msg) => {
                 vec![FixSuggestion::new(
                     vec!["caut config show".to_string()],
-                    format!("Configuration error: {}", msg),
+                    format!("Configuration error: {msg}"),
                 )]
             }
             Self::InvalidProvider(name) => suggestions::invalid_provider_suggestions(name),
@@ -618,10 +619,7 @@ impl CautError {
             Self::ProviderNoTokenAccounts(provider) => {
                 vec![FixSuggestion::new(
                     vec![format!("caut providers show {}", provider)],
-                    format!(
-                        "Provider {} does not support multiple token accounts.",
-                        provider
-                    ),
+                    format!("Provider {provider} does not support multiple token accounts."),
                 )]
             }
             Self::AccountNotFound(account) => suggestions::account_not_found_suggestions(account),
@@ -649,8 +647,7 @@ impl CautError {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
                     format!(
-                        "Failed to parse provider response: {}. This may indicate an API change.",
-                        msg
+                        "Failed to parse provider response: {msg}. This may indicate an API change."
                     ),
                 )]
             }
@@ -663,16 +660,14 @@ impl CautError {
             Self::PartialFailure { failed } => {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
-                    format!(
-                        "{} provider(s) failed. Run diagnostics to identify issues.",
-                        failed
-                    ),
+                    format!("{failed} provider(s) failed. Run diagnostics to identify issues."),
                 )]
             }
 
             // Environment errors
-            Self::CliNotFound { name } => suggestions::cli_not_found_suggestions(name),
-            Self::ProviderNotFound(name) => suggestions::cli_not_found_suggestions(name),
+            Self::CliNotFound { name } | Self::ProviderNotFound(name) => {
+                suggestions::cli_not_found_suggestions(name)
+            }
             Self::PermissionDenied { path } => suggestions::permission_denied_suggestions(path),
             Self::EnvVarMissing { name } => suggestions::env_var_missing_suggestions(name),
 
@@ -680,25 +675,21 @@ impl CautError {
             Self::Io(err) => {
                 vec![FixSuggestion::new(
                     vec!["# Check file permissions and disk space".to_string()],
-                    format!(
-                        "I/O error: {}. Check file permissions and available disk space.",
-                        err
-                    ),
+                    format!("I/O error: {err}. Check file permissions and available disk space."),
                 )]
             }
             Self::Json(err) => {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
                     format!(
-                        "JSON parsing error: {}. The data may be corrupted or in an unexpected format.",
-                        err
+                        "JSON parsing error: {err}. The data may be corrupted or in an unexpected format."
                     ),
                 )]
             }
             Self::Other(err) => {
                 vec![FixSuggestion::new(
                     vec!["caut doctor".to_string()],
-                    format!("Unexpected error: {}. Please report this issue.", err),
+                    format!("Unexpected error: {err}. Please report this issue."),
                 )]
             }
         }
@@ -883,13 +874,11 @@ mod tests {
             let code = err.error_code();
             assert!(
                 code.starts_with("CAUT-"),
-                "Error code {} should start with CAUT-",
-                code
+                "Error code {code} should start with CAUT-"
             );
             assert!(
                 code.len() >= 9,
-                "Error code {} should be at least 9 chars",
-                code
+                "Error code {code} should be at least 9 chars"
             );
         }
     }
@@ -900,71 +889,71 @@ mod tests {
 
         let codes: Vec<&str> = vec![
             CautError::AuthExpired {
-                provider: "".to_string(),
+                provider: String::new(),
             }
             .error_code(),
             CautError::AuthNotConfigured {
-                provider: "".to_string(),
+                provider: String::new(),
             }
             .error_code(),
             CautError::AuthInvalid {
-                provider: "".to_string(),
-                reason: "".to_string(),
+                provider: String::new(),
+                reason: String::new(),
             }
             .error_code(),
             CautError::Timeout(0).error_code(),
             CautError::TimeoutWithProvider {
-                provider: "".to_string(),
+                provider: String::new(),
                 seconds: 0,
             }
             .error_code(),
             CautError::DnsFailure {
-                host: "".to_string(),
+                host: String::new(),
             }
             .error_code(),
             CautError::SslError {
-                message: "".to_string(),
+                message: String::new(),
             }
             .error_code(),
             CautError::ConnectionRefused {
-                host: "".to_string(),
+                host: String::new(),
             }
             .error_code(),
-            CautError::Network("".to_string()).error_code(),
+            CautError::Network(String::new()).error_code(),
             CautError::ConfigNotFound {
-                path: "".to_string(),
+                path: String::new(),
             }
             .error_code(),
             CautError::ConfigParse {
-                path: "".to_string(),
+                path: String::new(),
                 line: None,
-                message: "".to_string(),
+                message: String::new(),
             }
             .error_code(),
             CautError::ConfigInvalid {
-                key: "".to_string(),
-                value: "".to_string(),
-                message: "".to_string(),
+                key: String::new(),
+                value: String::new(),
+                message: String::new(),
             }
             .error_code(),
-            CautError::Config("".to_string()).error_code(),
-            CautError::InvalidProvider("".to_string()).error_code(),
+            CautError::Config(String::new()).error_code(),
+            CautError::InvalidProvider(String::new()).error_code(),
             CautError::RateLimited {
-                provider: "".to_string(),
+                provider: String::new(),
                 retry_after: None,
-                message: "".to_string(),
+                message: String::new(),
             }
             .error_code(),
             CautError::ProviderUnavailable {
-                provider: "".to_string(),
-                message: "".to_string(),
+                provider: String::new(),
+                message: String::new(),
             }
             .error_code(),
             CautError::CliNotFound {
-                name: "".to_string(),
+                name: String::new(),
             }
             .error_code(),
-            CautError::ProviderNotFound("".to_string()).error_code(),
+            CautError::ProviderNotFound(String::new()).error_code(),
         ];
 
         let unique: HashSet<_> = codes.iter().collect();
@@ -991,14 +980,14 @@ mod tests {
             CautError::RateLimited {
                 provider: "test".to_string(),
                 retry_after: None,
-                message: "".to_string(),
+                message: String::new(),
             }
             .is_retryable()
         );
         assert!(
             CautError::ProviderUnavailable {
                 provider: "test".to_string(),
-                message: "".to_string(),
+                message: String::new(),
             }
             .is_retryable()
         );
@@ -1215,13 +1204,11 @@ mod tests {
             let suggestions = err.fix_suggestions();
             assert!(
                 !suggestions.is_empty(),
-                "Error {:?} should have at least one suggestion",
-                err
+                "Error {err:?} should have at least one suggestion"
             );
             assert!(
                 !suggestions[0].context.is_empty(),
-                "Error {:?} suggestion should have context",
-                err
+                "Error {err:?} suggestion should have context"
             );
         }
     }
@@ -1343,7 +1330,7 @@ mod tests {
         let err = CautError::AuthExpired {
             provider: "claude".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("authentication expired"));
         assert!(display.contains("claude"));
     }
@@ -1353,7 +1340,7 @@ mod tests {
         let err = CautError::AuthNotConfigured {
             provider: "codex".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("authentication not configured"));
         assert!(display.contains("codex"));
     }
@@ -1364,7 +1351,7 @@ mod tests {
             provider: "gemini".to_string(),
             reason: "token malformed".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("invalid credentials"));
         assert!(display.contains("gemini"));
         assert!(display.contains("token malformed"));
@@ -1376,7 +1363,7 @@ mod tests {
             provider: "cursor".to_string(),
             seconds: 45,
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("timeout"));
         assert!(display.contains("45s"));
         assert!(display.contains("cursor"));
@@ -1387,7 +1374,7 @@ mod tests {
         let err = CautError::DnsFailure {
             host: "api.anthropic.com".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("DNS"));
         assert!(display.contains("api.anthropic.com"));
     }
@@ -1397,7 +1384,7 @@ mod tests {
         let err = CautError::SslError {
             message: "certificate expired".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("SSL/TLS"));
         assert!(display.contains("certificate expired"));
     }
@@ -1407,7 +1394,7 @@ mod tests {
         let err = CautError::ConnectionRefused {
             host: "localhost:8080".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("connection refused"));
         assert!(display.contains("localhost:8080"));
     }
@@ -1417,7 +1404,7 @@ mod tests {
         let err = CautError::ConfigNotFound {
             path: "/etc/caut/config.toml".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("config file not found"));
         assert!(display.contains("/etc/caut/config.toml"));
     }
@@ -1429,7 +1416,7 @@ mod tests {
             line: Some(42),
             message: "unexpected token".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("config parse error"));
         assert!(display.contains("config.toml"));
         assert!(display.contains("unexpected token"));
@@ -1442,7 +1429,7 @@ mod tests {
             value: "abc".to_string(),
             message: "must be a number".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("invalid config value"));
         assert!(display.contains("timeout"));
         assert!(display.contains("must be a number"));
@@ -1455,7 +1442,7 @@ mod tests {
             retry_after: Some(Duration::from_secs(120)),
             message: "too many requests".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("rate limited"));
         assert!(display.contains("claude"));
         assert!(display.contains("too many requests"));
@@ -1467,7 +1454,7 @@ mod tests {
             provider: "codex".to_string(),
             message: "service down".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("unavailable"));
         assert!(display.contains("codex"));
         assert!(display.contains("service down"));
@@ -1480,7 +1467,7 @@ mod tests {
             status_code: Some(500),
             message: "internal server error".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("API error"));
         assert!(display.contains("gemini"));
         assert!(display.contains("internal server error"));
@@ -1491,7 +1478,7 @@ mod tests {
         let err = CautError::CliNotFound {
             name: "claude".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("CLI tool not found"));
         assert!(display.contains("claude"));
     }
@@ -1501,7 +1488,7 @@ mod tests {
         let err = CautError::PermissionDenied {
             path: "/etc/secret".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("permission denied"));
         assert!(display.contains("/etc/secret"));
     }
@@ -1511,7 +1498,7 @@ mod tests {
         let err = CautError::EnvVarMissing {
             name: "ANTHROPIC_API_KEY".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("environment variable not set"));
         assert!(display.contains("ANTHROPIC_API_KEY"));
     }
@@ -1522,7 +1509,7 @@ mod tests {
             provider: "claude".to_string(),
             source_type: "ftp".to_string(),
         };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("unsupported source"));
         assert!(display.contains("claude"));
         assert!(display.contains("ftp"));
@@ -1531,15 +1518,15 @@ mod tests {
     #[test]
     fn partial_failure_display() {
         let err = CautError::PartialFailure { failed: 3 };
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("partial failure"));
-        assert!(display.contains("3"));
+        assert!(display.contains('3'));
     }
 
     #[test]
     fn parse_response_display() {
         let err = CautError::ParseResponse("unexpected JSON".to_string());
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("failed to parse response"));
         assert!(display.contains("unexpected JSON"));
     }
@@ -1547,26 +1534,26 @@ mod tests {
     #[test]
     fn missing_rate_limit_display() {
         let err = CautError::MissingRateLimit;
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("missing rate limit data"));
     }
 
     #[test]
     fn account_errors_display() {
         let err = CautError::AccountRequiresSingleProvider;
-        assert!(format!("{}", err).contains("single provider"));
+        assert!(format!("{err}").contains("single provider"));
 
         let err = CautError::AllAccountsConflict;
-        assert!(format!("{}", err).contains("--all-accounts"));
+        assert!(format!("{err}").contains("--all-accounts"));
 
         let err = CautError::ProviderNoTokenAccounts("codex".to_string());
-        assert!(format!("{}", err).contains("token accounts"));
+        assert!(format!("{err}").contains("token accounts"));
 
         let err = CautError::AccountNotFound("work".to_string());
-        assert!(format!("{}", err).contains("account not found"));
+        assert!(format!("{err}").contains("account not found"));
 
         let err = CautError::NoAccountsConfigured("claude".to_string());
-        assert!(format!("{}", err).contains("no accounts configured"));
+        assert!(format!("{err}").contains("no accounts configured"));
     }
 
     // -------------------------------------------------------------------------
@@ -1873,7 +1860,7 @@ mod tests {
         ];
 
         for err in retryable_errors {
-            assert!(err.is_retryable(), "Error {:?} should be retryable", err);
+            assert!(err.is_retryable(), "Error {err:?} should be retryable");
         }
     }
 
@@ -1944,11 +1931,7 @@ mod tests {
         ];
 
         for err in non_retryable_errors {
-            assert!(
-                !err.is_retryable(),
-                "Error {:?} should NOT be retryable",
-                err
-            );
+            assert!(!err.is_retryable(), "Error {err:?} should NOT be retryable");
         }
     }
 
@@ -1961,23 +1944,23 @@ mod tests {
         let error_category_pairs: Vec<(CautError, &str)> = vec![
             (
                 CautError::AuthExpired {
-                    provider: "".to_string(),
+                    provider: String::new(),
                 },
                 "A",
             ),
             (CautError::Timeout(0), "N"),
-            (CautError::Config("".to_string()), "C"),
+            (CautError::Config(String::new()), "C"),
             (
                 CautError::RateLimited {
-                    provider: "".to_string(),
+                    provider: String::new(),
                     retry_after: None,
-                    message: "".to_string(),
+                    message: String::new(),
                 },
                 "P",
             ),
             (
                 CautError::CliNotFound {
-                    name: "".to_string(),
+                    name: String::new(),
                 },
                 "E",
             ),
@@ -1989,14 +1972,12 @@ mod tests {
             let actual_prefix = &code[5..6]; // "CAUT-X001" -> "X"
             assert_eq!(
                 actual_prefix, expected_prefix,
-                "Error code {} should have prefix {}",
-                code, expected_prefix
+                "Error code {code} should have prefix {expected_prefix}"
             );
             assert_eq!(
                 err.category().code_prefix(),
                 expected_prefix,
-                "Category prefix mismatch for {:?}",
-                err
+                "Category prefix mismatch for {err:?}"
             );
         }
     }

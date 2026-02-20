@@ -10,6 +10,10 @@ use crate::storage::config::Config;
 use std::time::Instant;
 
 /// Execute the doctor command.
+///
+/// # Errors
+/// Returns an error if provider selection parsing fails or if output
+/// rendering encounters an error.
 pub async fn execute(
     args: &DoctorArgs,
     format: OutputFormat,
@@ -54,15 +58,15 @@ pub async fn execute(
     let output = doctor::render_human(&report, no_color)?;
     match format {
         OutputFormat::Human => {
-            print!("{}", output);
+            print!("{output}");
         }
         OutputFormat::Json => {
             let json = doctor::render_json(&report, pretty)?;
-            println!("{}", json);
+            println!("{json}");
         }
         OutputFormat::Md => {
             let md = doctor::render_md(&report)?;
-            print!("{}", md);
+            print!("{md}");
         }
     }
 
@@ -105,7 +109,7 @@ fn check_config() -> DiagnosticCheck {
         Err(e) => DiagnosticCheck {
             name: "Config".to_string(),
             status: CheckStatus::Fail {
-                reason: format!("Failed to load: {}", e),
+                reason: format!("Failed to load: {e}"),
                 suggestion: Some("Check ~/.config/caut/config.toml".to_string()),
             },
             duration: Some(start.elapsed()),

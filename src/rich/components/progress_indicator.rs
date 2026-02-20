@@ -1,5 +1,7 @@
 //! Progress indicator component for multi-provider fetch progress.
 
+use std::fmt::Write;
+
 use crate::rich::{Renderable, ThemeConfig};
 use rich_rust::prelude::*;
 
@@ -17,7 +19,7 @@ pub struct ProgressIndicator {
 impl ProgressIndicator {
     /// Create a new progress indicator with a total count.
     #[must_use]
-    pub fn new(total: usize) -> Self {
+    pub const fn new(total: usize) -> Self {
         Self {
             total,
             completed: 0,
@@ -30,7 +32,7 @@ impl ProgressIndicator {
 
     /// Tick progress by one.
     #[must_use]
-    pub fn tick(mut self) -> Self {
+    pub const fn tick(mut self) -> Self {
         if self.completed < self.total {
             self.completed += 1;
         }
@@ -53,14 +55,14 @@ impl ProgressIndicator {
 
     /// Record a failure.
     #[must_use]
-    pub fn with_failure(mut self) -> Self {
+    pub const fn with_failure(mut self) -> Self {
         self.failed += 1;
         self
     }
 
     /// Set the number of failures.
     #[must_use]
-    pub fn with_failures(mut self, count: usize) -> Self {
+    pub const fn with_failures(mut self, count: usize) -> Self {
         self.failed = count;
         self
     }
@@ -74,7 +76,7 @@ impl ProgressIndicator {
 
     /// Set whether to show percentage.
     #[must_use]
-    pub fn show_percentage(mut self, show: bool) -> Self {
+    pub const fn show_percentage(mut self, show: bool) -> Self {
         self.show_percentage = show;
         self
     }
@@ -92,19 +94,21 @@ impl ProgressIndicator {
         if self.total == 0 {
             100.0
         } else {
-            (self.completed as f64 / self.total as f64) * 100.0
+            #[allow(clippy::cast_precision_loss)] // progress counts are small
+            let result = (self.completed as f64 / self.total as f64) * 100.0;
+            result
         }
     }
 
     /// Check if all items are complete.
     #[must_use]
-    pub fn is_complete(&self) -> bool {
+    pub const fn is_complete(&self) -> bool {
         self.completed >= self.total
     }
 
     /// Get the number of successful completions.
     #[must_use]
-    pub fn successful(&self) -> usize {
+    pub const fn successful(&self) -> usize {
         self.completed.saturating_sub(self.failed)
     }
 
@@ -115,7 +119,10 @@ impl ProgressIndicator {
 
         // Progress bar
         let pct = self.percentage();
-        let filled = ((pct / 100.0) * self.width as f64).round() as usize;
+        #[allow(clippy::cast_precision_loss)] // width is small
+        let width_f = self.width as f64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // percentage is 0-100
+        let filled = ((pct / 100.0) * width_f).round() as usize;
         let empty = self.width.saturating_sub(filled);
 
         let fill_color = if self.failed > 0 {
@@ -140,7 +147,7 @@ impl ProgressIndicator {
         // Current provider
         if let Some(provider) = &self.current_provider {
             segments.push(Segment::styled(
-                format!(" ({})", provider),
+                format!(" ({provider})"),
                 theme.primary.clone(),
             ));
         }
@@ -160,21 +167,24 @@ impl ProgressIndicator {
 impl Renderable for ProgressIndicator {
     fn render(&self) -> String {
         let pct = self.percentage();
-        let filled = ((pct / 100.0) * self.width as f64).round() as usize;
+        #[allow(clippy::cast_precision_loss)] // width is small
+        let width_f = self.width as f64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // percentage is 0-100
+        let filled = ((pct / 100.0) * width_f).round() as usize;
         let empty = self.width.saturating_sub(filled);
 
         let mut result = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 
         if self.show_percentage {
-            result.push_str(&format!(" {}/{}", self.completed, self.total));
+            let _ = write!(result, " {}/{}", self.completed, self.total);
         }
 
         if let Some(provider) = &self.current_provider {
-            result.push_str(&format!(" ({})", provider));
+            let _ = write!(result, " ({provider})");
         }
 
         if self.failed > 0 {
-            result.push_str(&format!(" [{} failed]", self.failed));
+            let _ = write!(result, " [{} failed]", self.failed);
         }
 
         result
@@ -182,21 +192,24 @@ impl Renderable for ProgressIndicator {
 
     fn render_plain(&self) -> String {
         let pct = self.percentage();
-        let filled = ((pct / 100.0) * self.width as f64).round() as usize;
+        #[allow(clippy::cast_precision_loss)] // width is small
+        let width_f = self.width as f64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // percentage is 0-100
+        let filled = ((pct / 100.0) * width_f).round() as usize;
         let empty = self.width.saturating_sub(filled);
 
         let mut result = format!("[{}{}]", "#".repeat(filled), "-".repeat(empty));
 
         if self.show_percentage {
-            result.push_str(&format!(" {}/{}", self.completed, self.total));
+            let _ = write!(result, " {}/{}", self.completed, self.total);
         }
 
         if let Some(provider) = &self.current_provider {
-            result.push_str(&format!(" ({})", provider));
+            let _ = write!(result, " ({provider})");
         }
 
         if self.failed > 0 {
-            result.push_str(&format!(" [{} failed]", self.failed));
+            let _ = write!(result, " [{} failed]", self.failed);
         }
 
         result
@@ -231,7 +244,7 @@ impl Spinner {
 
     /// Advance to the next frame.
     #[must_use]
-    pub fn tick(mut self) -> Self {
+    pub const fn tick(mut self) -> Self {
         self.current = (self.current + 1) % self.frames.len();
         self
     }
@@ -251,21 +264,18 @@ impl Default for Spinner {
 
 impl Renderable for Spinner {
     fn render(&self) -> String {
-        if let Some(label) = &self.label {
-            format!("{} {}", self.frame(), label)
-        } else {
-            self.frame().to_string()
-        }
+        self.label.as_ref().map_or_else(
+            || self.frame().to_string(),
+            |label| format!("{} {}", self.frame(), label),
+        )
     }
 
     fn render_plain(&self) -> String {
         let plain_frames = [".", "..", "...", "...."];
         let frame = plain_frames[self.current % plain_frames.len()];
-        if let Some(label) = &self.label {
-            format!("{} {}", frame, label)
-        } else {
-            frame.to_string()
-        }
+        self.label
+            .as_ref()
+            .map_or_else(|| frame.to_string(), |label| format!("{frame} {label}"))
     }
 }
 
@@ -319,8 +329,8 @@ mod tests {
             .with_failure();
         let plain = progress.render_plain();
         assert_no_ansi(&plain);
-        assert!(plain.contains("["));
-        assert!(plain.contains("]"));
+        assert!(plain.contains('['));
+        assert!(plain.contains(']'));
     }
 
     #[test]
@@ -380,6 +390,6 @@ mod tests {
         let spinner = Spinner::new().with_label("Working");
         let plain = spinner.render_plain();
         assert_no_ansi(&plain);
-        assert!(plain.contains("."));
+        assert!(plain.contains('.'));
     }
 }

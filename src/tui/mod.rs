@@ -61,7 +61,7 @@ pub fn restore_terminal(terminal: &mut Tui) -> io::Result<()> {
 ///
 /// Returns an error if the dashboard fails to run.
 pub async fn run_dashboard(args: &UsageArgs, refresh_interval_secs: u64) -> Result<()> {
-    let mut terminal = init_terminal().map_err(|e| crate::error::CautError::Io(e.into()))?;
+    let mut terminal = init_terminal().map_err(crate::error::CautError::Io)?;
 
     let app_result = App::new(args.clone(), refresh_interval_secs)
         .run(&mut terminal)

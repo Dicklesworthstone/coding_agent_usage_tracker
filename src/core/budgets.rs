@@ -107,7 +107,7 @@ pub struct BudgetLimits {
 impl BudgetLimits {
     /// Check if all limits are None/empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.daily_cost_usd.is_none()
             && self.weekly_cost_usd.is_none()
             && self.monthly_cost_usd.is_none()
@@ -136,7 +136,7 @@ pub struct BudgetConfig {
 impl BudgetConfig {
     /// Create a global budget configuration.
     #[must_use]
-    pub fn global(limits: BudgetLimits) -> Self {
+    pub const fn global(limits: BudgetLimits) -> Self {
         Self {
             provider: None,
             priority: BudgetPriority::Global,
@@ -146,7 +146,7 @@ impl BudgetConfig {
 
     /// Create a provider-specific budget configuration.
     #[must_use]
-    pub fn for_provider(provider: Provider, limits: BudgetLimits) -> Self {
+    pub const fn for_provider(provider: Provider, limits: BudgetLimits) -> Self {
         Self {
             provider: Some(provider),
             priority: BudgetPriority::ProviderSpecific,
@@ -156,7 +156,7 @@ impl BudgetConfig {
 
     /// Create a provider override configuration.
     #[must_use]
-    pub fn override_for_provider(provider: Provider, limits: BudgetLimits) -> Self {
+    pub const fn override_for_provider(provider: Provider, limits: BudgetLimits) -> Self {
         Self {
             provider: Some(provider),
             priority: BudgetPriority::Override,
@@ -172,19 +172,19 @@ impl BudgetConfig {
 /// Tracks where each resolved value came from.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BudgetSources {
-    /// Source of daily_cost_usd value.
+    /// Source of `daily_cost_usd` value.
     pub daily_cost_usd: Option<BudgetPriority>,
-    /// Source of weekly_cost_usd value.
+    /// Source of `weekly_cost_usd` value.
     pub weekly_cost_usd: Option<BudgetPriority>,
-    /// Source of monthly_cost_usd value.
+    /// Source of `monthly_cost_usd` value.
     pub monthly_cost_usd: Option<BudgetPriority>,
-    /// Source of daily_usage_percent value.
+    /// Source of `daily_usage_percent` value.
     pub daily_usage_percent: Option<BudgetPriority>,
-    /// Source of weekly_usage_percent value.
+    /// Source of `weekly_usage_percent` value.
     pub weekly_usage_percent: Option<BudgetPriority>,
-    /// Source of daily_credits value.
+    /// Source of `daily_credits` value.
     pub daily_credits: Option<BudgetPriority>,
-    /// Source of alert_at_percent value.
+    /// Source of `alert_at_percent` value.
     pub alert_at_percent: Option<BudgetPriority>,
 }
 
@@ -208,7 +208,7 @@ pub struct ResolvedBudget {
 impl ResolvedBudget {
     /// Check if any limits are configured.
     #[must_use]
-    pub fn has_limits(&self) -> bool {
+    pub const fn has_limits(&self) -> bool {
         !self.limits.is_empty()
     }
 }
@@ -243,7 +243,7 @@ pub fn resolve_budget(provider: Provider, configs: &[BudgetConfig]) -> ResolvedB
         .collect();
 
     // Sort by priority (highest first for easy override)
-    applicable.sort_by(|a, b| b.priority.cmp(&a.priority));
+    applicable.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
     let mut limits = BudgetLimits::default();
     let mut sources = BudgetSources::default();
@@ -251,51 +251,51 @@ pub fn resolve_budget(provider: Provider, configs: &[BudgetConfig]) -> ResolvedB
     // Merge each field from highest to lowest priority
     for config in &applicable {
         // Daily cost
-        if limits.daily_cost_usd.is_none() {
-            if let Some(val) = config.limits.daily_cost_usd {
-                limits.daily_cost_usd = Some(val);
-                sources.daily_cost_usd = Some(config.priority);
-            }
+        if limits.daily_cost_usd.is_none()
+            && let Some(val) = config.limits.daily_cost_usd
+        {
+            limits.daily_cost_usd = Some(val);
+            sources.daily_cost_usd = Some(config.priority);
         }
 
         // Weekly cost
-        if limits.weekly_cost_usd.is_none() {
-            if let Some(val) = config.limits.weekly_cost_usd {
-                limits.weekly_cost_usd = Some(val);
-                sources.weekly_cost_usd = Some(config.priority);
-            }
+        if limits.weekly_cost_usd.is_none()
+            && let Some(val) = config.limits.weekly_cost_usd
+        {
+            limits.weekly_cost_usd = Some(val);
+            sources.weekly_cost_usd = Some(config.priority);
         }
 
         // Monthly cost
-        if limits.monthly_cost_usd.is_none() {
-            if let Some(val) = config.limits.monthly_cost_usd {
-                limits.monthly_cost_usd = Some(val);
-                sources.monthly_cost_usd = Some(config.priority);
-            }
+        if limits.monthly_cost_usd.is_none()
+            && let Some(val) = config.limits.monthly_cost_usd
+        {
+            limits.monthly_cost_usd = Some(val);
+            sources.monthly_cost_usd = Some(config.priority);
         }
 
         // Daily usage percent
-        if limits.daily_usage_percent.is_none() {
-            if let Some(val) = config.limits.daily_usage_percent {
-                limits.daily_usage_percent = Some(val);
-                sources.daily_usage_percent = Some(config.priority);
-            }
+        if limits.daily_usage_percent.is_none()
+            && let Some(val) = config.limits.daily_usage_percent
+        {
+            limits.daily_usage_percent = Some(val);
+            sources.daily_usage_percent = Some(config.priority);
         }
 
         // Weekly usage percent
-        if limits.weekly_usage_percent.is_none() {
-            if let Some(val) = config.limits.weekly_usage_percent {
-                limits.weekly_usage_percent = Some(val);
-                sources.weekly_usage_percent = Some(config.priority);
-            }
+        if limits.weekly_usage_percent.is_none()
+            && let Some(val) = config.limits.weekly_usage_percent
+        {
+            limits.weekly_usage_percent = Some(val);
+            sources.weekly_usage_percent = Some(config.priority);
         }
 
         // Daily credits
-        if limits.daily_credits.is_none() {
-            if let Some(val) = config.limits.daily_credits {
-                limits.daily_credits = Some(val);
-                sources.daily_credits = Some(config.priority);
-            }
+        if limits.daily_credits.is_none()
+            && let Some(val) = config.limits.daily_credits
+        {
+            limits.daily_credits = Some(val);
+            sources.daily_credits = Some(config.priority);
         }
     }
 
@@ -450,6 +450,7 @@ pub struct CurrentUsage {
 ///
 /// A vector of all violations found. May include both hard limit violations
 /// and alert threshold warnings.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn check_budget_violations(
     budget: &ResolvedBudget,
@@ -458,98 +459,96 @@ pub fn check_budget_violations(
     let mut violations = Vec::new();
 
     // Check daily cost
-    if let (Some(limit), Some(current)) = (budget.limits.daily_cost_usd, usage.daily_cost_usd) {
-        if current >= limit {
-            violations.push(BudgetViolation::new(
-                ViolationType::DailyCost,
-                limit,
-                current,
-                budget
-                    .sources
-                    .daily_cost_usd
-                    .unwrap_or(BudgetPriority::Global),
-            ));
-        }
+    if let (Some(limit), Some(current)) = (budget.limits.daily_cost_usd, usage.daily_cost_usd)
+        && current >= limit
+    {
+        violations.push(BudgetViolation::new(
+            ViolationType::DailyCost,
+            limit,
+            current,
+            budget
+                .sources
+                .daily_cost_usd
+                .unwrap_or(BudgetPriority::Global),
+        ));
     }
 
     // Check weekly cost
-    if let (Some(limit), Some(current)) = (budget.limits.weekly_cost_usd, usage.weekly_cost_usd) {
-        if current >= limit {
-            violations.push(BudgetViolation::new(
-                ViolationType::WeeklyCost,
-                limit,
-                current,
-                budget
-                    .sources
-                    .weekly_cost_usd
-                    .unwrap_or(BudgetPriority::Global),
-            ));
-        }
+    if let (Some(limit), Some(current)) = (budget.limits.weekly_cost_usd, usage.weekly_cost_usd)
+        && current >= limit
+    {
+        violations.push(BudgetViolation::new(
+            ViolationType::WeeklyCost,
+            limit,
+            current,
+            budget
+                .sources
+                .weekly_cost_usd
+                .unwrap_or(BudgetPriority::Global),
+        ));
     }
 
     // Check monthly cost
-    if let (Some(limit), Some(current)) = (budget.limits.monthly_cost_usd, usage.monthly_cost_usd) {
-        if current >= limit {
-            violations.push(BudgetViolation::new(
-                ViolationType::MonthlyCost,
-                limit,
-                current,
-                budget
-                    .sources
-                    .monthly_cost_usd
-                    .unwrap_or(BudgetPriority::Global),
-            ));
-        }
+    if let (Some(limit), Some(current)) = (budget.limits.monthly_cost_usd, usage.monthly_cost_usd)
+        && current >= limit
+    {
+        violations.push(BudgetViolation::new(
+            ViolationType::MonthlyCost,
+            limit,
+            current,
+            budget
+                .sources
+                .monthly_cost_usd
+                .unwrap_or(BudgetPriority::Global),
+        ));
     }
 
     // Check daily usage percent
     if let (Some(limit), Some(current)) =
         (budget.limits.daily_usage_percent, usage.daily_usage_percent)
+        && current >= limit
     {
-        if current >= limit {
-            violations.push(BudgetViolation::new(
-                ViolationType::DailyUsage,
-                limit,
-                current,
-                budget
-                    .sources
-                    .daily_usage_percent
-                    .unwrap_or(BudgetPriority::Global),
-            ));
-        }
+        violations.push(BudgetViolation::new(
+            ViolationType::DailyUsage,
+            limit,
+            current,
+            budget
+                .sources
+                .daily_usage_percent
+                .unwrap_or(BudgetPriority::Global),
+        ));
     }
 
     // Check weekly usage percent
     if let (Some(limit), Some(current)) = (
         budget.limits.weekly_usage_percent,
         usage.weekly_usage_percent,
-    ) {
-        if current >= limit {
-            violations.push(BudgetViolation::new(
-                ViolationType::WeeklyUsage,
-                limit,
-                current,
-                budget
-                    .sources
-                    .weekly_usage_percent
-                    .unwrap_or(BudgetPriority::Global),
-            ));
-        }
+    ) && current >= limit
+    {
+        violations.push(BudgetViolation::new(
+            ViolationType::WeeklyUsage,
+            limit,
+            current,
+            budget
+                .sources
+                .weekly_usage_percent
+                .unwrap_or(BudgetPriority::Global),
+        ));
     }
 
     // Check daily credits
-    if let (Some(limit), Some(current)) = (budget.limits.daily_credits, usage.daily_credits) {
-        if current >= limit {
-            violations.push(BudgetViolation::new(
-                ViolationType::DailyCredits,
-                limit,
-                current,
-                budget
-                    .sources
-                    .daily_credits
-                    .unwrap_or(BudgetPriority::Global),
-            ));
-        }
+    if let (Some(limit), Some(current)) = (budget.limits.daily_credits, usage.daily_credits)
+        && current >= limit
+    {
+        violations.push(BudgetViolation::new(
+            ViolationType::DailyCredits,
+            limit,
+            current,
+            budget
+                .sources
+                .daily_credits
+                .unwrap_or(BudgetPriority::Global),
+        ));
     }
 
     // Check alert thresholds for cost-based limits
@@ -632,10 +631,10 @@ impl BudgetFileConfig {
         let mut configs = Vec::new();
 
         // Add global config
-        if let Some(ref global_limits) = self.global {
-            if !global_limits.is_empty() {
-                configs.push(BudgetConfig::global(global_limits.clone()));
-            }
+        if let Some(ref global_limits) = self.global
+            && !global_limits.is_empty()
+        {
+            configs.push(BudgetConfig::global(global_limits.clone()));
         }
 
         // Add provider-specific configs
@@ -656,13 +655,13 @@ impl BudgetFileConfig {
                 }
 
                 // Add override limits
-                if let Some(ref override_limits) = provider_config.override_limits {
-                    if !override_limits.is_empty() {
-                        configs.push(BudgetConfig::override_for_provider(
-                            provider,
-                            override_limits.clone(),
-                        ));
-                    }
+                if let Some(ref override_limits) = provider_config.override_limits
+                    && !override_limits.is_empty()
+                {
+                    configs.push(BudgetConfig::override_for_provider(
+                        provider,
+                        override_limits.clone(),
+                    ));
                 }
             }
         }

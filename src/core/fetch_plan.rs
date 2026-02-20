@@ -1,7 +1,7 @@
 //! Provider fetch pipeline and strategies.
 //!
-//! Implements the ordered strategy fallback system from CodexBar.
-//! See EXISTING_CODEXBAR_STRUCTURE.md section 6.
+//! Implements the ordered strategy fallback system from `CodexBar`.
+//! See `EXISTING_CODEXBAR_STRUCTURE.md` section 6.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -32,6 +32,7 @@ pub enum SourceMode {
 
 impl SourceMode {
     /// Parse from CLI argument.
+    #[must_use]
     pub fn from_arg(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "auto" => Some(Self::Auto),
@@ -100,7 +101,7 @@ impl std::fmt::Debug for FetchStrategy {
         f.debug_struct("FetchStrategy")
             .field("id", &self.id)
             .field("kind", &self.kind)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -151,7 +152,7 @@ impl FetchOutcome {
 
     /// Create a failed outcome.
     #[must_use]
-    pub fn failure(
+    pub const fn failure(
         provider: Provider,
         error: crate::error::CautError,
         attempts: Vec<FetchAttempt>,

@@ -1,6 +1,6 @@
 //! JSONL logging to stderr.
 //!
-//! Implements CodexBar's `--json-output` logging behavior.
+//! Implements `CodexBar`'s `--json-output` logging behavior.
 
 use std::fs::OpenOptions;
 use std::path::PathBuf;
@@ -102,7 +102,7 @@ impl LogLevel {
     }
 }
 
-/// Parse log level from CAUT_LOG env var.
+/// Parse log level from `CAUT_LOG` env var.
 #[must_use]
 pub fn parse_log_level_from_env() -> Option<Level> {
     std::env::var(LOG_LEVEL_ENV).ok().and_then(|value| {
@@ -115,7 +115,7 @@ pub fn parse_log_level_from_env() -> Option<Level> {
     })
 }
 
-/// Parse log format from CAUT_LOG_FORMAT env var.
+/// Parse log format from `CAUT_LOG_FORMAT` env var.
 #[must_use]
 pub fn parse_log_format_from_env() -> Option<LogFormat> {
     std::env::var(LOG_FORMAT_ENV).ok().and_then(|value| {
@@ -128,7 +128,7 @@ pub fn parse_log_format_from_env() -> Option<LogFormat> {
     })
 }
 
-/// Parse log file path from CAUT_LOG_FILE env var.
+/// Parse log file path from `CAUT_LOG_FILE` env var.
 #[must_use]
 pub fn parse_log_file_from_env() -> Option<PathBuf> {
     std::env::var(LOG_FILE_ENV).ok().and_then(|value| {
@@ -158,11 +158,8 @@ pub fn init(level: LogLevel, format: LogFormat, log_file: Option<PathBuf>, verbo
     });
 
     let make_writer = |file: Option<&std::fs::File>| -> BoxMakeWriter {
-        if let Some(file) = file.and_then(|inner| inner.try_clone().ok()) {
-            BoxMakeWriter::new(file)
-        } else {
-            BoxMakeWriter::new(std::io::stderr)
-        }
+        file.and_then(|inner| inner.try_clone().ok())
+            .map_or_else(|| BoxMakeWriter::new(std::io::stderr), BoxMakeWriter::new)
     };
 
     let make_filter = || {

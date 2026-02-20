@@ -40,6 +40,9 @@ pub struct StatusFetcher {
 
 impl StatusFetcher {
     /// Create a new status fetcher.
+    ///
+    /// # Panics
+    /// Panics if the HTTP client fails to build (invalid TLS configuration).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -51,6 +54,9 @@ impl StatusFetcher {
     }
 
     /// Fetch status from a statuspage.io-compatible URL.
+    ///
+    /// # Errors
+    /// Returns an error if the HTTP request fails due to network issues or timeout.
     pub async fn fetch(&self, base_url: &str) -> Result<StatusPayload> {
         let api_url = format!("{}/api/v2/status.json", base_url.trim_end_matches('/'));
 

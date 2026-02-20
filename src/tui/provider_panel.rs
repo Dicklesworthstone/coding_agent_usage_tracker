@@ -20,7 +20,7 @@ pub struct ProviderPanel<'a> {
 impl<'a> ProviderPanel<'a> {
     /// Create a new provider panel.
     #[must_use]
-    pub fn new(payload: &'a ProviderPayload, selected: bool) -> Self {
+    pub const fn new(payload: &'a ProviderPayload, selected: bool) -> Self {
         Self { payload, selected }
     }
 
@@ -94,13 +94,13 @@ impl<'a> ProviderPanel<'a> {
         }
 
         // Identity info
-        if let Some(identity) = &usage.identity {
-            if let Some(email) = &identity.account_email {
-                lines.push(Line::from(vec![
-                    Span::styled("Account: ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(email.clone()),
-                ]));
-            }
+        if let Some(identity) = &usage.identity
+            && let Some(email) = &identity.account_email
+        {
+            lines.push(Line::from(vec![
+                Span::styled("Account: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(email.clone()),
+            ]));
         }
 
         if usage.primary.is_none() && usage.secondary.is_none() {
@@ -183,9 +183,12 @@ impl Widget for ProviderPanel<'_> {
             let used = 100.0 - remaining;
             let color = Self::usage_color(remaining);
 
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            // percentage is 0-100
+            let used_pct = used as u16;
             let gauge = Gauge::default()
                 .gauge_style(Style::default().fg(color))
-                .percent(used as u16)
+                .percent(used_pct)
                 .label(format!("{used:.0}% used"));
 
             gauge.render(chunks[0], buf);

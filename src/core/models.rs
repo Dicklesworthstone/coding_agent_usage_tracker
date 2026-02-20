@@ -1,7 +1,7 @@
-//! Core data models ported from CodexBar.
+//! Core data models ported from `CodexBar`.
 //!
 //! These types represent the canonical usage data structures.
-//! See EXISTING_CODEXBAR_STRUCTURE.md section 5 for field semantics.
+//! See `EXISTING_CODEXBAR_STRUCTURE.md` section 5 for field semantics.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ impl RateWindow {
 
     /// Create a new rate window with the given usage percentage.
     #[must_use]
-    pub fn new(used_percent: f64) -> Self {
+    pub const fn new(used_percent: f64) -> Self {
         Self {
             used_percent,
             window_minutes: None,
@@ -147,7 +147,7 @@ pub struct CreditsSnapshot {
 // OpenAI Dashboard (Codex-specific)
 // =============================================================================
 
-/// Daily breakdown from OpenAI dashboard.
+/// Daily breakdown from `OpenAI` dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAIDashboardDailyBreakdown {
@@ -160,7 +160,7 @@ pub struct OpenAIDashboardDailyBreakdown {
     pub tokens: Option<i64>,
 }
 
-/// Extended dashboard data from OpenAI web interface.
+/// Extended dashboard data from `OpenAI` web interface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAIDashboardSnapshot {
@@ -509,11 +509,13 @@ impl<T> RobotOutput<T> {
 
 impl RobotOutput<Vec<ProviderPayload>> {
     /// Create a usage output envelope.
+    #[must_use]
     pub fn usage(providers: Vec<ProviderPayload>, errors: Vec<String>) -> Self {
         Self::with_errors("usage", providers, errors)
     }
 
     /// Create a usage output envelope with structured error details.
+    #[must_use]
     pub fn usage_with_details(
         providers: Vec<ProviderPayload>,
         errors: Vec<String>,
@@ -531,6 +533,7 @@ impl RobotOutput<Vec<ProviderPayload>> {
 
 impl RobotOutput<Vec<CostPayload>> {
     /// Create a cost output envelope.
+    #[must_use]
     pub fn cost(providers: Vec<CostPayload>, errors: Vec<String>) -> Self {
         Self::with_errors("cost", providers, errors)
     }

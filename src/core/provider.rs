@@ -1,7 +1,7 @@
 //! Provider descriptors and registry.
 //!
 //! Defines all supported providers and their metadata.
-//! See EXISTING_CODEXBAR_STRUCTURE.md section 6-7.
+//! See `EXISTING_CODEXBAR_STRUCTURE.md` section 6-7.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -106,6 +106,9 @@ impl Provider {
     }
 
     /// Parse from CLI argument.
+    ///
+    /// # Errors
+    /// Returns an error if the name does not match any known provider.
     pub fn from_cli_name(name: &str) -> Result<Self> {
         let lower = name.to_lowercase();
         Self::ALL
@@ -252,11 +255,12 @@ impl Provider {
 // =============================================================================
 
 /// Provider selection from CLI arguments.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ProviderSelection {
     /// Single provider.
     Single(Provider),
     /// Primary providers only (Codex + Claude).
+    #[default]
     Both,
     /// All providers.
     All,
@@ -266,6 +270,9 @@ pub enum ProviderSelection {
 
 impl ProviderSelection {
     /// Parse from CLI argument string.
+    ///
+    /// # Errors
+    /// Returns an error if the argument does not match a valid provider name.
     pub fn from_arg(arg: &str) -> Result<Self> {
         match arg.to_lowercase().as_str() {
             "both" => Ok(Self::Both),
@@ -289,12 +296,6 @@ impl ProviderSelection {
     #[must_use]
     pub const fn is_single(&self) -> bool {
         matches!(self, Self::Single(_))
-    }
-}
-
-impl Default for ProviderSelection {
-    fn default() -> Self {
-        Self::Both
     }
 }
 

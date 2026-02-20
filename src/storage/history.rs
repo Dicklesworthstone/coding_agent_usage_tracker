@@ -65,26 +65,30 @@ impl Default for RetentionPolicy {
 impl RetentionPolicy {
     /// Create a policy with custom detailed retention days.
     #[must_use]
-    pub fn with_detailed_days(mut self, days: i64) -> Self {
+    pub const fn with_detailed_days(mut self, days: i64) -> Self {
         self.detailed_retention_days = days;
         self
     }
 
     /// Create a policy with custom aggregate retention days.
     #[must_use]
-    pub fn with_aggregate_days(mut self, days: i64) -> Self {
+    pub const fn with_aggregate_days(mut self, days: i64) -> Self {
         self.aggregate_retention_days = days;
         self
     }
 
     /// Create a policy with custom max size.
     #[must_use]
-    pub fn with_max_size(mut self, bytes: u64) -> Self {
+    pub const fn with_max_size(mut self, bytes: u64) -> Self {
         self.max_size_bytes = bytes;
         self
     }
 
     /// Validate the policy configuration.
+    ///
+    /// # Errors
+    /// Returns an error if retention days are non-positive, detailed retention
+    /// is not less than aggregate retention, or max size is zero.
     pub fn validate(&self) -> Result<()> {
         if self.detailed_retention_days <= 0 {
             return Err(CautError::Config(
@@ -136,6 +140,10 @@ pub struct HistoryStore {
 
 impl HistoryStore {
     /// Create or open a history database at the given path.
+    ///
+    /// # Errors
+    /// Returns an error if the parent directory cannot be created, the database
+    /// cannot be opened, or schema migrations fail.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -150,6 +158,9 @@ impl HistoryStore {
     }
 
     /// Open an in-memory history database (for testing).
+    ///
+    /// # Errors
+    /// Returns an error if the in-memory database cannot be opened or migrations fail.
     pub fn open_in_memory() -> Result<Self> {
         let mut conn = Connection::open_in_memory()
             .map_err(|e| CautError::Other(anyhow::anyhow!("open in-memory db: {e}")))?;
@@ -160,6 +171,9 @@ impl HistoryStore {
     }
 
     /// Record a usage snapshot for a provider.
+    ///
+    /// # Errors
+    /// Returns an error if the INSERT statement cannot be prepared or executed.
     pub fn record_snapshot(&self, snapshot: &UsageSnapshot, provider: &Provider) -> Result<i64> {
         let primary = snapshot.primary.as_ref();
         let secondary = snapshot.secondary.as_ref();
@@ -187,17 +201,17 @@ impl HistoryStore {
             primary.and_then(|p| p.window_minutes),
             primary
                 .and_then(|p| p.resets_at.as_ref())
-                .map(|dt| dt.to_rfc3339()),
+                .map(chrono::DateTime::to_rfc3339),
             secondary.map(|p| p.used_percent),
             secondary.and_then(|p| p.window_minutes),
             secondary
                 .and_then(|p| p.resets_at.as_ref())
-                .map(|dt| dt.to_rfc3339()),
+                .map(chrono::DateTime::to_rfc3339),
             tertiary.map(|p| p.used_percent),
             tertiary.and_then(|p| p.window_minutes),
             tertiary
                 .and_then(|p| p.resets_at.as_ref())
-                .map(|dt| dt.to_rfc3339()),
+                .map(chrono::DateTime::to_rfc3339),
             Option::<f64>::None,
             Option::<f64>::None,
             Option::<f64>::None,
@@ -211,6 +225,9 @@ impl HistoryStore {
     }
 
     /// Get snapshots for a provider within a time range.
+    ///
+    /// # Errors
+    /// Returns an error if the time range is invalid (`from > to`) or the query fails.
     pub fn get_snapshots(
         &self,
         provider: &Provider,
@@ -255,6 +272,9 @@ impl HistoryStore {
     }
 
     /// Get the latest snapshot for each provider.
+    ///
+    /// # Errors
+    /// Returns an error if the SELECT query cannot be prepared or executed.
     pub fn get_latest_all(&self) -> Result<HashMap<Provider, StoredSnapshot>> {
         let mut stmt = self
             .conn
@@ -285,6 +305,9 @@ impl HistoryStore {
     }
 
     /// Get usage velocity (% change per hour) over a recent window.
+    ///
+    /// # Errors
+    /// Returns an error if the velocity window is non-positive or the snapshot query fails.
     pub fn get_velocity(&self, provider: &Provider, window: Duration) -> Result<Option<f64>> {
         if window <= Duration::zero() {
             return Err(CautError::Config(
@@ -302,7 +325,10 @@ impl HistoryStore {
     }
 
     /// Get aggregated stats for a time period.
-    pub fn get_stats(&self, provider: &Provider, period: StatsPeriod) -> Result<UsageStats> {
+    ///
+    /// # Errors
+    /// Returns an error if the snapshot query for the given period fails.
+    pub fn get_stats(&self, provider: &Provider, period: &StatsPeriod) -> Result<UsageStats> {
         let (from, to) = period.to_range();
         let snapshots = self.get_snapshots(provider, from, to)?;
 
@@ -330,6 +356,7 @@ impl HistoryStore {
         }
 
         let sum: f64 = values.iter().sum();
+        #[allow(clippy::cast_precision_loss)] // sample count is small in practice
         let average_primary_pct = sum / sample_count as f64;
         let max_primary_pct = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         let min_primary_pct = values.iter().copied().fold(f64::INFINITY, f64::min);
@@ -344,11 +371,17 @@ impl HistoryStore {
     }
 
     /// Cleanup old snapshots using the retention window.
+    ///
+    /// # Errors
+    /// Returns an error if the retention days are non-positive or the cleanup query fails.
     pub fn cleanup(&self, retention_days: i64) -> Result<usize> {
         cleanup_old_snapshots(&self.conn, retention_days)
     }
 
     /// Cleanup old snapshots with the default retention window.
+    ///
+    /// # Errors
+    /// Returns an error if the cleanup query fails.
     pub fn cleanup_default(&self) -> Result<usize> {
         self.cleanup(DEFAULT_RETENTION_DAYS)
     }
@@ -360,6 +393,10 @@ impl HistoryStore {
     /// 2. Delete very old aggregates
     /// 3. Check size limit and delete more if needed
     /// 4. Vacuum if significant data was removed
+    ///
+    /// # Errors
+    /// Returns an error if the policy is invalid or any database operation
+    /// during aggregation, deletion, or vacuuming fails.
     pub fn prune(&self, policy: &RetentionPolicy, dry_run: bool) -> Result<PruneResult> {
         policy.validate()?;
         let start = Instant::now();
@@ -376,18 +413,18 @@ impl HistoryStore {
         result.aggregates_created = self.aggregate_old_snapshots(&cutoff, dry_run)?;
 
         // Delete the detailed snapshots that were aggregated
-        if !dry_run {
-            result.detailed_deleted = self.delete_old_snapshots(&cutoff)?;
-        } else {
+        if dry_run {
             result.detailed_deleted = self.count_old_snapshots(&cutoff)?;
+        } else {
+            result.detailed_deleted = self.delete_old_snapshots(&cutoff)?;
         }
 
         // Phase 2: Delete very old aggregates
         let agg_cutoff = Utc::now() - Duration::days(policy.aggregate_retention_days);
-        if !dry_run {
-            result.aggregates_deleted = self.delete_old_aggregates(&agg_cutoff)?;
-        } else {
+        if dry_run {
             result.aggregates_deleted = self.count_old_aggregates(&agg_cutoff)?;
+        } else {
+            result.aggregates_deleted = self.delete_old_aggregates(&agg_cutoff)?;
         }
 
         // Phase 3: Check size limit
@@ -418,7 +455,10 @@ impl HistoryStore {
             self.get_db_size()?
         };
         result.bytes_freed = initial_size.saturating_sub(final_size);
-        result.duration_ms = start.elapsed().as_millis() as u64;
+        #[allow(clippy::cast_possible_truncation)] // prune duration in millis always fits u64
+        {
+            result.duration_ms = start.elapsed().as_millis() as u64;
+        }
 
         // Record prune in history (if not dry run)
         if !dry_run {
@@ -429,22 +469,25 @@ impl HistoryStore {
     }
 
     /// Prune with the default policy.
+    ///
+    /// # Errors
+    /// Returns an error if any database operation during pruning fails.
     pub fn prune_default(&self, dry_run: bool) -> Result<PruneResult> {
         self.prune(&RetentionPolicy::default(), dry_run)
     }
 
     /// Check if pruning is needed based on the interval.
+    ///
+    /// # Errors
+    /// Returns an error if the policy is invalid or any database operation fails.
     pub fn maybe_prune(&self, policy: &RetentionPolicy) -> Result<Option<PruneResult>> {
         policy.validate()?;
 
         // Check last prune time
-        let should_prune = match self.get_last_prune_time()? {
-            Some(last) => {
-                let elapsed = Utc::now() - last;
-                elapsed.num_hours() >= policy.prune_interval_hours
-            }
-            None => true, // Never pruned, do it now
-        };
+        let should_prune = self.get_last_prune_time().is_none_or(|last| {
+            let elapsed = Utc::now() - last;
+            elapsed.num_hours() >= policy.prune_interval_hours
+        });
 
         // Also check size - always prune if over limit
         let current_size = self.get_db_size()?;
@@ -458,6 +501,9 @@ impl HistoryStore {
     }
 
     /// Count rows in a specified table.
+    ///
+    /// # Errors
+    /// Returns an error if the table name is invalid or the COUNT query fails.
     pub fn count_rows(&self, table: &str) -> Result<i64> {
         // Validate table name to prevent SQL injection
         let valid_tables = [
@@ -480,6 +526,9 @@ impl HistoryStore {
     }
 
     /// Get the approximate database size in bytes.
+    ///
+    /// # Errors
+    /// Returns an error if the PRAGMA queries for page count or page size fail.
     pub fn get_db_size(&self) -> Result<u64> {
         let page_count: i64 = self
             .conn
@@ -491,11 +540,12 @@ impl HistoryStore {
             .query_row("PRAGMA page_size", [], |row| row.get(0))
             .map_err(|e| CautError::Other(anyhow::anyhow!("page_size: {e}")))?;
 
+        #[allow(clippy::cast_sign_loss)] // page count and page size are non-negative
         Ok((page_count * page_size) as u64)
     }
 
     /// Get the last prune timestamp.
-    fn get_last_prune_time(&self) -> Result<Option<DateTime<Utc>>> {
+    fn get_last_prune_time(&self) -> Option<DateTime<Utc>> {
         let result: Option<String> = self
             .conn
             .query_row(
@@ -505,13 +555,11 @@ impl HistoryStore {
             )
             .ok();
 
-        match result {
-            Some(s) => Ok(parse_optional_timestamp(Some(s))),
-            None => Ok(None),
-        }
+        result.and_then(|s| parse_optional_timestamp(Some(s)))
     }
 
     /// Record a prune operation in history.
+    #[allow(clippy::cast_possible_wrap)] // prune counts and sizes are small enough to fit in i64
     fn record_prune(&self, result: &PruneResult) -> Result<()> {
         self.conn
             .execute(
@@ -526,7 +574,7 @@ impl HistoryStore {
                     result.aggregates_created as i64,
                     result.bytes_freed as i64,
                     result.duration_ms as i64,
-                    if result.dry_run { 1 } else { 0 },
+                    i32::from(result.dry_run),
                 ],
             )
             .map_err(|e| CautError::Other(anyhow::anyhow!("record prune: {e}")))?;
@@ -679,6 +727,8 @@ impl HistoryStore {
                 |row| row.get(0),
             )
             .map_err(|e| CautError::Other(anyhow::anyhow!("count snapshots: {e}")))?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        // COUNT(*) is non-negative and small
         Ok(count as usize)
     }
 
@@ -706,6 +756,8 @@ impl HistoryStore {
                 |row| row.get(0),
             )
             .map_err(|e| CautError::Other(anyhow::anyhow!("count aggregates: {e}")))?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        // COUNT(*) is non-negative and small
         Ok(count as usize)
     }
 
@@ -866,7 +918,7 @@ impl StatsPeriod {
                 let last_month = start_of_previous_month(today);
                 (last_month, this_month)
             }
-            Self::Custom { from, to } => (from.clone(), to.clone()),
+            Self::Custom { from, to } => (*from, *to),
         }
     }
 }
@@ -880,7 +932,7 @@ fn map_row(row: &Row<'_>) -> rusqlite::Result<StoredSnapshot> {
     Ok(StoredSnapshot {
         id: row.get(0)?,
         provider,
-        fetched_at: parse_timestamp(row.get::<_, String>(2)?).map_err(|e| {
+        fetched_at: parse_timestamp(&row.get::<_, String>(2)?).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
         })?,
         source: row.get(3)?,
@@ -909,8 +961,8 @@ fn map_row(row: &Row<'_>) -> rusqlite::Result<StoredSnapshot> {
     })
 }
 
-fn parse_timestamp(value: String) -> Result<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(&value)
+fn parse_timestamp(value: &str) -> Result<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
         .map_err(|e| CautError::Other(anyhow::anyhow!("invalid timestamp '{value}': {e}")))
 }
@@ -1064,7 +1116,7 @@ mod tests {
             .expect("record 2");
 
         let stats = store
-            .get_stats(&Provider::Codex, StatsPeriod::Last7Days)
+            .get_stats(&Provider::Codex, &StatsPeriod::Last7Days)
             .expect("stats");
         assert_eq!(stats.sample_count, 2);
         assert!((stats.average_primary_pct - 20.0).abs() < f64::EPSILON);

@@ -53,7 +53,7 @@ async fn main() -> ExitCode {
 
     if cli.debug_rich {
         let diagnostics = caut::rich::collect_rich_diagnostics(format, no_color);
-        println!("{}", diagnostics);
+        println!("{diagnostics}");
         return ExitCode::SUCCESS;
     }
 
@@ -66,7 +66,7 @@ async fn main() -> ExitCode {
             tracing::error!("{}", e);
             // Use rich error rendering (respects format, no_color, TTY, and pretty)
             let error_output = caut::render::error::render_error_full(&e, format, no_color, pretty);
-            eprintln!("{}", error_output);
+            eprintln!("{error_output}");
             ExitCode::from(e.exit_code() as u8)
         }
     }
@@ -113,6 +113,7 @@ async fn run(cli: Cli) -> caut::Result<()> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn handle_token_accounts(cmd: caut::cli::args::TokenAccountsCommand) -> caut::Result<()> {
     use caut::cli::args::TokenAccountsCommand;
     use caut::core::provider::Provider;
@@ -131,10 +132,10 @@ fn handle_token_accounts(cmd: caut::cli::args::TokenAccountsCommand) -> caut::Re
 
                 let accounts = store.get_all(provider);
                 if accounts.is_empty() {
-                    println!("No accounts configured for provider: {}", provider_name);
+                    println!("No accounts configured for provider: {provider_name}");
                 } else {
                     println!("Accounts for {}:", provider.display_name());
-                    println!("{:<20} {:<40} {}", "Label", "ID", "Added");
+                    println!("{:<20} {:<40} Added", "Label", "ID");
                     println!("{:-<20} {:-<40} {:-<20}", "", "", "");
                     for account in accounts {
                         let added = account.added_at.format("%Y-%m-%d %H:%M");
@@ -149,7 +150,7 @@ fn handle_token_accounts(cmd: caut::cli::args::TokenAccountsCommand) -> caut::Re
                     if !accounts.is_empty() {
                         found_any = true;
                         println!("\n{}:", provider.display_name());
-                        println!("{:<20} {:<40} {}", "Label", "ID", "Added");
+                        println!("{:<20} {:<40} Added", "Label", "ID");
                         println!("{:-<20} {:-<40} {:-<20}", "", "", "");
                         for account in accounts {
                             let added = account.added_at.format("%Y-%m-%d %H:%M");
@@ -241,7 +242,7 @@ fn handle_token_accounts(cmd: caut::cli::args::TokenAccountsCommand) -> caut::Re
 /// Print quickstart help when no command is given.
 fn print_quickstart() {
     println!(
-        r#"caut - Coding Agent Usage Tracker
+        r"caut - Coding Agent Usage Tracker
 
 Track your LLM provider usage (Codex, Claude, Gemini, and more).
 
@@ -277,7 +278,7 @@ ROBOT MODE (for AI agents):
     caut usage --format md        # Markdown output
 
 For more help: caut --help
-"#
+"
     );
 
     // Print version info

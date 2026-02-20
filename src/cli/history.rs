@@ -22,6 +22,10 @@ use crate::storage::{
 };
 
 /// Execute history commands.
+///
+/// # Errors
+/// Returns an error if the history database cannot be opened, or if the
+/// requested subcommand (show, prune, stats, export) fails.
 pub fn execute(
     cmd: &HistoryCommand,
     format: OutputFormat,
@@ -37,6 +41,7 @@ pub fn execute(
 }
 
 /// Execute the show subcommand - display usage history with trend visualization.
+#[allow(clippy::too_many_lines)]
 fn execute_show(
     args: &HistoryShowArgs,
     format: OutputFormat,
@@ -96,7 +101,7 @@ fn execute_show(
         let mut provider_data = Vec::new();
 
         for provider in &providers {
-            let days = get_daily_history(&store, provider, from, to)?;
+            let days = get_daily_history(&store, *provider, from, to)?;
             if !days.is_empty() {
                 let day_json: Vec<_> = days
                     .iter()
@@ -144,7 +149,7 @@ fn execute_show(
         );
 
         for provider in &providers {
-            let days = get_daily_history(&store, provider, from, to)?;
+            let days = get_daily_history(&store, *provider, from, to)?;
             if !days.is_empty() {
                 any_data = true;
                 println!("## {}\n", provider.display_name());
@@ -153,8 +158,7 @@ fn execute_show(
                 for day in &days {
                     let cost = day
                         .total_cost
-                        .map(|c| format!("${:.2}", c))
-                        .unwrap_or_else(|| "-".to_string());
+                        .map_or_else(|| "-".to_string(), |c| format!("${c:.2}"));
                     let limit = if day.hit_limit { "Yes" } else { "-" };
                     println!(
                         "| {} | {:.1}% | {} | {} |",
@@ -173,11 +177,11 @@ fn execute_show(
 
     // Human format - use the render_history_chart function
     for provider in &providers {
-        let days = get_daily_history(&store, provider, from, to)?;
+        let days = get_daily_history(&store, *provider, from, to)?;
         if !days.is_empty() {
             any_data = true;
             let chart = render_history_chart(provider.display_name(), &days, &options);
-            println!("{}", chart);
+            println!("{chart}");
             println!();
         }
     }
@@ -193,13 +197,13 @@ fn execute_show(
 /// Get daily history data for a provider, suitable for chart rendering.
 fn get_daily_history(
     store: &HistoryStore,
-    provider: &Provider,
+    provider: Provider,
     from: chrono::DateTime<Utc>,
     to: chrono::DateTime<Utc>,
 ) -> Result<Vec<HistoryDay>> {
     use std::collections::HashMap;
 
-    let snapshots = store.get_snapshots(provider, from, to)?;
+    let snapshots = store.get_snapshots(&provider, from, to)?;
 
     if snapshots.is_empty() {
         return Ok(Vec::new());
@@ -223,6 +227,7 @@ fn get_daily_history(
     let mut days: Vec<HistoryDay> = daily_data
         .into_iter()
         .map(|(date_str, values)| {
+            #[allow(clippy::cast_precision_loss)] // values.len() is small enough for f64
             let avg_pct = values.iter().map(|(p, _)| *p).sum::<f64>() / values.len() as f64;
             let max_pct = values
                 .iter()
@@ -235,8 +240,7 @@ fn get_daily_history(
 
             // Parse the date to get a nice label
             let label = chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
-                .map(|d| d.format("%a %m/%d").to_string())
-                .unwrap_or(date_str.clone());
+                .map_or_else(|_| date_str.clone(), |d| d.format("%a %m/%d").to_string());
 
             HistoryDay {
                 label,
@@ -254,6 +258,7 @@ fn get_daily_history(
 }
 
 /// Execute the prune subcommand.
+#[allow(clippy::too_many_lines)]
 fn execute_prune(args: &HistoryPruneArgs, format: OutputFormat, pretty: bool) -> Result<()> {
     let paths = AppPaths::new();
     let history_path = paths.history_db_file();
@@ -513,18 +518,12 @@ fn execute_stats(format: OutputFormat, pretty: bool) -> Result<()> {
             println!("|----------|-------|");
             println!("| Database path | `{}` |", history_path.display());
             println!("| Database size | {} |", format_bytes(db_size));
-            println!("| Snapshots | {} |", snapshot_count);
-            println!("| Daily aggregates | {} |", aggregate_count);
-            println!("| Prune operations | {} |", prune_count);
+            println!("| Snapshots | {snapshot_count} |");
+            println!("| Daily aggregates | {aggregate_count} |");
+            println!("| Prune operations | {prune_count} |");
             println!("\n## Default Retention Policy\n");
-            println!(
-                "- Detailed retention: {} days",
-                DEFAULT_DETAILED_RETENTION_DAYS
-            );
-            println!(
-                "- Aggregate retention: {} days",
-                DEFAULT_AGGREGATE_RETENTION_DAYS
-            );
+            println!("- Detailed retention: {DEFAULT_DETAILED_RETENTION_DAYS} days");
+            println!("- Aggregate retention: {DEFAULT_AGGREGATE_RETENTION_DAYS} days");
             println!("- Max size: {}", format_bytes(DEFAULT_MAX_SIZE_BYTES));
         }
         OutputFormat::Human => {
@@ -534,13 +533,13 @@ fn execute_stats(format: OutputFormat, pretty: bool) -> Result<()> {
             println!("Size: {}", format_bytes(db_size));
             println!();
             println!("Records:");
-            println!("  Snapshots: {}", snapshot_count);
-            println!("  Daily aggregates: {}", aggregate_count);
-            println!("  Prune history: {}", prune_count);
+            println!("  Snapshots: {snapshot_count}");
+            println!("  Daily aggregates: {aggregate_count}");
+            println!("  Prune history: {prune_count}");
             println!();
             println!("Default retention policy:");
-            println!("  Detailed: {} days", DEFAULT_DETAILED_RETENTION_DAYS);
-            println!("  Aggregates: {} days", DEFAULT_AGGREGATE_RETENTION_DAYS);
+            println!("  Detailed: {DEFAULT_DETAILED_RETENTION_DAYS} days");
+            println!("  Aggregates: {DEFAULT_AGGREGATE_RETENTION_DAYS} days");
             println!("  Max size: {}", format_bytes(DEFAULT_MAX_SIZE_BYTES));
         }
     }
@@ -597,7 +596,7 @@ fn execute_export(args: &HistoryExportArgs) -> Result<()> {
     }
 
     // Sort by timestamp (most recent first)
-    all_snapshots.sort_by(|a, b| b.fetched_at.cmp(&a.fetched_at));
+    all_snapshots.sort_by_key(|b| std::cmp::Reverse(b.fetched_at));
 
     // Apply limit if specified
     if let Some(limit) = args.limit {
@@ -624,11 +623,11 @@ fn execute_export(args: &HistoryExportArgs) -> Result<()> {
     }
 
     // Print summary to stderr if writing to file
-    if args.output.is_some() {
+    if let Some(ref output_path) = args.output {
         eprintln!(
             "Exported {} snapshots to {}",
             all_snapshots.len(),
-            args.output.as_ref().unwrap().display()
+            output_path.display()
         );
     }
 
@@ -757,8 +756,8 @@ fn export_csv(mut writer: Box<dyn Write>, snapshots: &[StoredSnapshot]) -> Resul
             csv_opt_f64(s.cost_today_usd),
             csv_opt_f64(s.cost_mtd_usd),
             csv_opt_f64(s.credits_remaining),
-            csv_opt_str(&s.account_email),
-            csv_opt_str(&s.account_org),
+            csv_opt_str(s.account_email.as_ref()),
+            csv_opt_str(s.account_org.as_ref()),
             csv_opt_i64(s.fetch_duration_ms),
         )
         .map_err(|e| CautError::Other(anyhow::anyhow!("Failed to write CSV row: {e}")))?;
@@ -797,8 +796,8 @@ fn csv_opt_datetime(v: Option<DateTime<Utc>>) -> String {
 }
 
 /// Format optional string for CSV with escaping.
-fn csv_opt_str(v: &Option<String>) -> String {
-    v.as_ref().map_or(String::new(), |s| csv_escape(s))
+fn csv_opt_str(v: Option<&String>) -> String {
+    v.map_or(String::new(), |s| csv_escape(s))
 }
 
 /// Count rows in a table.
@@ -807,6 +806,7 @@ fn count_table(store: &HistoryStore, table: &str) -> Result<i64> {
 }
 
 /// Format bytes in human-readable form.
+#[allow(clippy::cast_precision_loss)] // byte sizes fit comfortably in f64
 fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
@@ -819,6 +819,6 @@ fn format_bytes(bytes: u64) -> String {
     } else if bytes >= KB {
         format!("{:.2} KB", bytes as f64 / KB as f64)
     } else {
-        format!("{} bytes", bytes)
+        format!("{bytes} bytes")
     }
 }

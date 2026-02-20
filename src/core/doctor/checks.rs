@@ -25,14 +25,14 @@ pub async fn check_cli_installed(provider: Provider) -> (DiagnosticCheck, Option
         Ok(path) => {
             // Try to get version
             let version = get_cli_version(cli_name).await;
-            let details = match &version {
-                Some(v) => format!("Found at {:?}, version: {}", path, v),
-                None => format!("Found at {:?}", path),
-            };
+            let details = version.as_ref().map_or_else(
+                || format!("Found at {}", path.display()),
+                |v| format!("Found at {}, version: {v}", path.display()),
+            );
 
             (
                 DiagnosticCheck {
-                    name: format!("{} CLI installed", cli_name),
+                    name: format!("{cli_name} CLI installed"),
                     status: CheckStatus::Pass {
                         details: Some(details),
                     },
@@ -43,7 +43,7 @@ pub async fn check_cli_installed(provider: Provider) -> (DiagnosticCheck, Option
         }
         Err(_) => (
             DiagnosticCheck {
-                name: format!("{} CLI installed", cli_name),
+                name: format!("{cli_name} CLI installed"),
                 status: CheckStatus::Fail {
                     reason: "CLI not found in PATH".to_string(),
                     suggestion: Some(provider.install_suggestion().to_string()),
@@ -59,9 +59,8 @@ pub async fn check_cli_installed(provider: Provider) -> (DiagnosticCheck, Option
 async fn get_cli_version(cli_name: &str) -> Option<String> {
     // Try common version flags in order
     for flag in ["--version", "-V", "version", "-v"] {
-        let output = match run_command(cli_name, &[flag], CLI_VERSION_TIMEOUT).await {
-            Ok(output) => output,
-            Err(_) => continue,
+        let Ok(output) = run_command(cli_name, &[flag], CLI_VERSION_TIMEOUT).await else {
+            continue;
         };
 
         if output.success() {
@@ -90,7 +89,7 @@ fn extract_version(output: &str) -> Option<String> {
         for word in line.split_whitespace() {
             let word = word.trim_start_matches('v');
             // Check if it looks like a version number
-            if word.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            if word.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                 // Must contain at least one dot and start with digits
                 // Allow alphanumeric for prerelease identifiers (e.g., 0.6.1-beta, 1.0.0-rc.1)
                 if word.contains('.') && is_version_string(word) {
@@ -140,14 +139,11 @@ pub async fn check_authenticated(provider: Provider) -> DiagnosticCheck {
 
 /// Check Claude authentication.
 async fn check_claude_auth() -> CheckStatus {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => {
-            return CheckStatus::Fail {
-                reason: "Cannot determine home directory".to_string(),
-                suggestion: None,
-            };
-        }
+    let Some(home) = dirs::home_dir() else {
+        return CheckStatus::Fail {
+            reason: "Cannot determine home directory".to_string(),
+            suggestion: None,
+        };
     };
 
     let creds_path = home.join(".claude").join(".credentials.json");
@@ -209,12 +205,12 @@ async fn check_claude_auth() -> CheckStatus {
                 )
             }
             Err(e) => CheckStatus::Fail {
-                reason: format!("Credentials file invalid: {}", e),
+                reason: format!("Credentials file invalid: {e}"),
                 suggestion: Some(Provider::Claude.auth_suggestion().to_string()),
             },
         },
         Err(e) => CheckStatus::Fail {
-            reason: format!("Failed to read credentials: {}", e),
+            reason: format!("Failed to read credentials: {e}"),
             suggestion: Some(Provider::Claude.auth_suggestion().to_string()),
         },
     }
@@ -222,14 +218,11 @@ async fn check_claude_auth() -> CheckStatus {
 
 /// Check Codex authentication.
 async fn check_codex_auth() -> CheckStatus {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => {
-            return CheckStatus::Fail {
-                reason: "Cannot determine home directory".to_string(),
-                suggestion: None,
-            };
-        }
+    let Some(home) = dirs::home_dir() else {
+        return CheckStatus::Fail {
+            reason: "Cannot determine home directory".to_string(),
+            suggestion: None,
+        };
     };
 
     let auth_path = home.join(".codex").join("auth.json");
@@ -250,17 +243,17 @@ async fn check_codex_auth() -> CheckStatus {
                     .get("tokens")
                     .and_then(|t| t.get("access_token"))
                     .and_then(|t| t.as_str())
-                    .map_or(false, |s| !s.is_empty());
+                    .is_some_and(|s| !s.is_empty());
 
                 let has_api_key = json
                     .get("apiKey")
                     .and_then(|k| k.as_str())
-                    .map_or(false, |s| !s.is_empty());
+                    .is_some_and(|s| !s.is_empty());
 
                 if has_access_token || has_api_key {
                     let method = if has_access_token { "OAuth" } else { "API key" };
                     CheckStatus::Pass {
-                        details: Some(format!("Authenticated via {}", method)),
+                        details: Some(format!("Authenticated via {method}")),
                     }
                 } else {
                     CheckStatus::Fail {
@@ -270,12 +263,12 @@ async fn check_codex_auth() -> CheckStatus {
                 }
             }
             Err(e) => CheckStatus::Fail {
-                reason: format!("Auth file invalid: {}", e),
+                reason: format!("Auth file invalid: {e}"),
                 suggestion: Some(Provider::Codex.auth_suggestion().to_string()),
             },
         },
         Err(e) => CheckStatus::Fail {
-            reason: format!("Failed to read auth file: {}", e),
+            reason: format!("Failed to read auth file: {e}"),
             suggestion: Some(Provider::Codex.auth_suggestion().to_string()),
         },
     }
@@ -283,14 +276,11 @@ async fn check_codex_auth() -> CheckStatus {
 
 /// Check Gemini authentication.
 async fn check_gemini_auth() -> CheckStatus {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => {
-            return CheckStatus::Fail {
-                reason: "Cannot determine home directory".to_string(),
-                suggestion: None,
-            };
-        }
+    let Some(home) = dirs::home_dir() else {
+        return CheckStatus::Fail {
+            reason: "Cannot determine home directory".to_string(),
+            suggestion: None,
+        };
     };
 
     // Check for Gemini-specific credentials
@@ -328,14 +318,11 @@ async fn check_gemini_auth() -> CheckStatus {
 /// Check Cursor authentication.
 #[allow(clippy::unused_async)]
 async fn check_cursor_auth() -> CheckStatus {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => {
-            return CheckStatus::Fail {
-                reason: "Cannot determine home directory".to_string(),
-                suggestion: None,
-            };
-        }
+    let Some(home) = dirs::home_dir() else {
+        return CheckStatus::Fail {
+            reason: "Cannot determine home directory".to_string(),
+            suggestion: None,
+        };
     };
 
     let auth_path = home.join(".cursor").join("auth.json");
@@ -356,14 +343,14 @@ async fn check_cursor_auth() -> CheckStatus {
 #[allow(clippy::unused_async)]
 async fn check_generic_auth(provider: Provider) -> CheckStatus {
     // Check if there's a known credentials path
-    if let Some(creds_path) = provider.credentials_path() {
-        if let Some(home) = dirs::home_dir() {
-            let full_path = home.join(creds_path);
-            if full_path.exists() {
-                return CheckStatus::Pass {
-                    details: Some("Credentials file found".to_string()),
-                };
-            }
+    if let Some(creds_path) = provider.credentials_path()
+        && let Some(home) = dirs::home_dir()
+    {
+        let full_path = home.join(creds_path);
+        if full_path.exists() {
+            return CheckStatus::Pass {
+                details: Some("Credentials file found".to_string()),
+            };
         }
     }
 
@@ -374,6 +361,7 @@ async fn check_generic_auth(provider: Provider) -> CheckStatus {
 }
 
 /// Check credential health (token expiration, etc.) for a provider.
+#[must_use]
 pub fn check_credential_health(provider: Provider) -> Option<DiagnosticCheck> {
     let start = Instant::now();
     let aggregator = AuthHealthAggregator::new();
@@ -479,7 +467,7 @@ async fn check_reachability(provider: Provider) -> CheckStatus {
         },
         Err(CautError::Timeout(_)) => CheckStatus::Timeout { after: API_TIMEOUT },
         Err(e) => CheckStatus::Fail {
-            reason: format!("Failed to run CLI: {}", e),
+            reason: format!("Failed to run CLI: {e}"),
             suggestion: Some(provider.install_suggestion().to_string()),
         },
     }
@@ -608,11 +596,8 @@ mod tests {
         assert!(check.duration.is_some());
 
         // Should not timeout immediately
-        match &check.status {
-            CheckStatus::Timeout { after } => {
-                assert_eq!(*after, API_TIMEOUT);
-            }
-            _ => {} // Other statuses are valid
+        if let CheckStatus::Timeout { after } = &check.status {
+            assert_eq!(*after, API_TIMEOUT);
         }
     }
 

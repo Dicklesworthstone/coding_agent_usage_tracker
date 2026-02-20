@@ -63,6 +63,7 @@ pub const ENV_CONFIG: &str = "CAUT_CONFIG";
 /// This struct represents the final, validated configuration to be used
 /// by the application. All values have been resolved according to the
 /// precedence rules.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     /// Providers to query.
@@ -162,13 +163,12 @@ impl ResolvedConfig {
         })
     }
 
-    /// Load config file, respecting CAUT_CONFIG override.
+    /// Load config file, respecting `CAUT_CONFIG` override.
     fn load_config() -> Result<Config> {
-        if let Ok(path) = std::env::var(ENV_CONFIG) {
-            Config::load_from(Path::new(&path))
-        } else {
-            Config::load()
-        }
+        std::env::var(ENV_CONFIG).map_or_else(
+            |_| Config::load(),
+            |path| Config::load_from(Path::new(&path)),
+        )
     }
 
     /// Resolve providers setting.
@@ -178,11 +178,11 @@ impl ResolvedConfig {
         source: &mut ConfigSource,
     ) -> Result<Vec<Provider>> {
         // 1. CLI flag
-        if let Some(args) = usage_args {
-            if let Some(ref provider_arg) = args.provider {
-                *source = ConfigSource::Cli;
-                return Self::parse_provider_arg(provider_arg);
-            }
+        if let Some(args) = usage_args
+            && let Some(ref provider_arg) = args.provider
+        {
+            *source = ConfigSource::Cli;
+            return Self::parse_provider_arg(provider_arg);
         }
 
         // 2. Environment variable
@@ -261,15 +261,14 @@ impl ResolvedConfig {
         Ok(OutputFormat::Human)
     }
 
-    /// Parse a format string into OutputFormat.
+    /// Parse a format string into `OutputFormat`.
     fn parse_format(s: &str) -> Result<OutputFormat> {
         match s.to_lowercase().as_str() {
             "human" => Ok(OutputFormat::Human),
             "json" => Ok(OutputFormat::Json),
             "md" | "markdown" => Ok(OutputFormat::Md),
             _ => Err(crate::error::CautError::Config(format!(
-                "Invalid format '{}'. Valid formats: human, json, md",
-                s
+                "Invalid format '{s}'. Valid formats: human, json, md"
             ))),
         }
     }
@@ -293,11 +292,11 @@ impl ResolvedConfig {
         }
 
         // 2. Environment variable
-        if let Ok(timeout_env) = std::env::var(ENV_TIMEOUT) {
-            if let Ok(timeout) = timeout_env.parse::<u64>() {
-                *source = ConfigSource::Env;
-                return Duration::from_secs(timeout);
-            }
+        if let Ok(timeout_env) = std::env::var(ENV_TIMEOUT)
+            && let Ok(timeout) = timeout_env.parse::<u64>()
+        {
+            *source = ConfigSource::Env;
+            return Duration::from_secs(timeout);
         }
 
         // 3. Config file
@@ -305,7 +304,7 @@ impl ResolvedConfig {
         Duration::from_secs(config.general.timeout_seconds)
     }
 
-    /// Resolve no_color setting.
+    /// Resolve `no_color` setting.
     fn resolve_no_color(cli: &Cli, config: &Config, source: &mut ConfigSource) -> bool {
         // 1. CLI --no-color flag
         if cli.no_color {
@@ -374,18 +373,18 @@ impl ResolvedConfig {
         false
     }
 
-    /// Resolve include_status setting.
-    fn resolve_include_status(
+    /// Resolve `include_status` setting.
+    const fn resolve_include_status(
         usage_args: Option<&UsageArgs>,
         config: &Config,
         source: &mut ConfigSource,
     ) -> bool {
         // 1. CLI --status flag
-        if let Some(args) = usage_args {
-            if args.status {
-                *source = ConfigSource::Cli;
-                return true;
-            }
+        if let Some(args) = usage_args
+            && args.status
+        {
+            *source = ConfigSource::Cli;
+            return true;
         }
 
         // 2. Config file
@@ -402,14 +401,14 @@ impl ResolvedConfig {
     /// Check if an environment variable is set to a truthy value.
     fn is_env_truthy(var: &str) -> bool {
         std::env::var(var)
-            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-            .unwrap_or(false)
+            .is_ok_and(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
     }
 }
 
 /// Application configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Config {
     /// General settings.
     pub general: GeneralConfig,
@@ -452,7 +451,7 @@ pub struct ProviderSettings {
     pub priority: Option<i32>,
     /// Override timeout for this provider specifically (in seconds).
     pub timeout_seconds: Option<u64>,
-    /// Override default strategies to try (e.g., ["oauth", "cli-pty"]).
+    /// Override default strategies to try (e.g., [`oauth`, `cli-pty`]).
     pub strategies: Option<Vec<String>>,
     /// Custom API base URL (if different from default).
     pub api_base: Option<String>,
@@ -480,16 +479,6 @@ pub struct OutputConfig {
     pub color: bool,
     /// Whether to pretty-print JSON output.
     pub pretty: bool,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            providers: ProvidersConfig::default(),
-            output: OutputConfig::default(),
-        }
-    }
 }
 
 impl Default for GeneralConfig {
@@ -532,7 +521,7 @@ impl ProvidersConfig {
     /// or if its settings have `enabled: true`.
     #[must_use]
     pub fn is_enabled(&self, provider_name: &str) -> bool {
-        self.settings.get(provider_name).map_or(true, |s| s.enabled)
+        self.settings.get(provider_name).is_none_or(|s| s.enabled)
     }
 }
 
@@ -551,6 +540,9 @@ impl Config {
     ///
     /// Returns default config if the file doesn't exist.
     /// Returns error only if the file exists but is invalid.
+    ///
+    /// # Errors
+    /// Returns an error if the config file exists but contains invalid TOML.
     pub fn load() -> Result<Self> {
         let paths = AppPaths::new();
         Self::load_from(&paths.config.join("config.toml"))
@@ -560,6 +552,9 @@ impl Config {
     ///
     /// Returns default config if the file doesn't exist.
     /// Returns error only if the file exists but is invalid.
+    ///
+    /// # Errors
+    /// Returns an error if the file exists but cannot be read or contains invalid TOML.
     pub fn load_from(path: &Path) -> Result<Self> {
         if !path.exists() {
             tracing::debug!(?path, "Config file not found, using defaults");
@@ -575,12 +570,19 @@ impl Config {
     }
 
     /// Save configuration to the default config file path.
+    ///
+    /// # Errors
+    /// Returns an error if serialization fails or the file cannot be written.
     pub fn save(&self) -> Result<()> {
         let paths = AppPaths::new();
         self.save_to(&paths.config.join("config.toml"))
     }
 
     /// Save configuration to a specific path.
+    ///
+    /// # Errors
+    /// Returns an error if the parent directory cannot be created, serialization fails,
+    /// or the file cannot be written.
     pub fn save_to(&self, path: &Path) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
@@ -608,6 +610,10 @@ impl Config {
     /// - Provider names are valid
     /// - Output format is valid (human, json, md)
     /// - Timeout is within reasonable bounds (1-300 seconds)
+    ///
+    /// # Errors
+    /// Returns an error if any provider name is invalid, the output format is unrecognized,
+    /// the timeout is out of bounds, or a per-provider timeout is out of bounds.
     pub fn validate(&self) -> Result<()> {
         use crate::core::provider::Provider;
         use crate::error::CautError;
@@ -628,13 +634,12 @@ impl Config {
         }
 
         // Validate output format
-        if let Some(format) = &self.output.format {
-            if !["human", "json", "md"].contains(&format.as_str()) {
-                return Err(CautError::Config(format!(
-                    "Invalid format \"{}\". Valid formats: human, json, md",
-                    format
-                )));
-            }
+        if let Some(format) = &self.output.format
+            && !["human", "json", "md"].contains(&format.as_str())
+        {
+            return Err(CautError::Config(format!(
+                "Invalid format \"{format}\". Valid formats: human, json, md"
+            )));
         }
 
         // Validate timeout bounds
@@ -655,13 +660,12 @@ impl Config {
 
         // Validate per-provider timeout bounds
         for (name, settings) in &self.providers.settings {
-            if let Some(timeout) = settings.timeout_seconds {
-                if timeout == 0 || timeout > 300 {
-                    return Err(CautError::Config(format!(
-                        "Provider \"{name}\" timeout must be between 1 and 300 seconds, got {}",
-                        timeout
-                    )));
-                }
+            if let Some(timeout) = settings.timeout_seconds
+                && (timeout == 0 || timeout > 300)
+            {
+                return Err(CautError::Config(format!(
+                    "Provider \"{name}\" timeout must be between 1 and 300 seconds, got {timeout}"
+                )));
             }
         }
 
@@ -691,10 +695,10 @@ impl Config {
             timeout: std::time::Duration::from_secs(
                 settings
                     .timeout_seconds
-                    .unwrap_or(provider.default_timeout().as_secs()),
+                    .unwrap_or_else(|| provider.default_timeout().as_secs()),
             ),
             strategies: settings.strategies.clone(),
-            api_base: settings.api_base.clone(),
+            api_base: settings.api_base,
         }
     }
 
@@ -1492,10 +1496,10 @@ foo = "bar"
         let mut file = NamedTempFile::new().unwrap();
         writeln!(
             file,
-            r#"
+            r"
 [general]
 timeout_seconds = 45
-"#
+"
         )
         .unwrap();
 
@@ -1524,13 +1528,13 @@ timeout_seconds = 45
         // Write custom config
         std::fs::write(
             &config_path,
-            r#"
+            r"
 [general]
 timeout_seconds = 99
 
 [output]
 pretty = true
-"#,
+",
         )
         .unwrap();
 

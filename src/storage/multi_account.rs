@@ -99,7 +99,7 @@ pub enum SwitchTrigger {
 impl SwitchTrigger {
     /// Convert to database string representation.
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Manual => "manual",
             Self::Threshold => "threshold",
@@ -141,7 +141,7 @@ pub enum CircuitState {
 impl CircuitState {
     /// Convert to database string representation.
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Closed => "closed",
             Self::Open => "open",
@@ -176,7 +176,7 @@ pub enum SnapshotTrigger {
 impl SnapshotTrigger {
     /// Convert to database string representation.
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Manual => "manual",
             Self::Switch => "switch",
@@ -292,7 +292,7 @@ impl NewUsageSnapshot {
 
     /// Set the trigger type.
     #[must_use]
-    pub fn with_trigger(mut self, trigger: SnapshotTrigger) -> Self {
+    pub const fn with_trigger(mut self, trigger: SnapshotTrigger) -> Self {
         self.trigger_type = trigger;
         self
     }
@@ -306,7 +306,7 @@ impl NewUsageSnapshot {
 
     /// Set the primary rate window.
     #[must_use]
-    pub fn with_primary(
+    pub const fn with_primary(
         mut self,
         used_pct: f64,
         window_minutes: Option<i32>,
@@ -320,7 +320,7 @@ impl NewUsageSnapshot {
 
     /// Set the secondary rate window.
     #[must_use]
-    pub fn with_secondary(
+    pub const fn with_secondary(
         mut self,
         used_pct: f64,
         window_minutes: Option<i32>,
@@ -349,13 +349,16 @@ pub struct MultiAccountDb<'a> {
 impl<'a> MultiAccountDb<'a> {
     /// Create a new database handle.
     #[must_use]
-    pub fn new(conn: &'a Connection) -> Self {
+    pub const fn new(conn: &'a Connection) -> Self {
         Self { conn }
     }
 
     // ===== Account CRUD =====
 
     /// Insert a new account.
+    ///
+    /// # Errors
+    /// Returns an error if the database INSERT fails.
     pub fn insert_account(&self, account: &Account) -> Result<()> {
         self.conn
             .execute(
@@ -378,6 +381,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Get an account by ID.
+    ///
+    /// # Errors
+    /// Returns an error if the database query fails.
     pub fn get_account(&self, id: &str) -> Result<Option<Account>> {
         let result = self
             .conn
@@ -392,8 +398,8 @@ impl<'a> MultiAccountDb<'a> {
                         email: row.get(2)?,
                         label: row.get(3)?,
                         credential_hash: row.get(4)?,
-                        added_at: parse_datetime(row.get::<_, String>(5)?),
-                        last_seen_at: row.get::<_, Option<String>>(6)?.map(parse_datetime),
+                        added_at: parse_datetime(&row.get::<_, String>(5)?),
+                        last_seen_at: row.get::<_, Option<String>>(6)?.map(|s| parse_datetime(&s)),
                         is_active: row.get(7)?,
                         metadata: row.get(8)?,
                     })
@@ -405,6 +411,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Find an account by provider and email.
+    ///
+    /// # Errors
+    /// Returns an error if the database query fails.
     pub fn find_account(&self, provider: &str, email: &str) -> Result<Option<Account>> {
         let result = self
             .conn
@@ -419,8 +428,8 @@ impl<'a> MultiAccountDb<'a> {
                         email: row.get(2)?,
                         label: row.get(3)?,
                         credential_hash: row.get(4)?,
-                        added_at: parse_datetime(row.get::<_, String>(5)?),
-                        last_seen_at: row.get::<_, Option<String>>(6)?.map(parse_datetime),
+                        added_at: parse_datetime(&row.get::<_, String>(5)?),
+                        last_seen_at: row.get::<_, Option<String>>(6)?.map(|s| parse_datetime(&s)),
                         is_active: row.get(7)?,
                         metadata: row.get(8)?,
                     })
@@ -432,6 +441,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// List all accounts, optionally filtered by provider.
+    ///
+    /// # Errors
+    /// Returns an error if the database query or row mapping fails.
     pub fn list_accounts(&self, provider: Option<&str>) -> Result<Vec<Account>> {
         let mut accounts = Vec::new();
 
@@ -465,8 +477,8 @@ impl<'a> MultiAccountDb<'a> {
                 email: row.get(2)?,
                 label: row.get(3)?,
                 credential_hash: row.get(4)?,
-                added_at: parse_datetime(row.get::<_, String>(5)?),
-                last_seen_at: row.get::<_, Option<String>>(6)?.map(parse_datetime),
+                added_at: parse_datetime(&row.get::<_, String>(5)?),
+                last_seen_at: row.get::<_, Option<String>>(6)?.map(|s| parse_datetime(&s)),
                 is_active: row.get(7)?,
                 metadata: row.get(8)?,
             })
@@ -481,7 +493,10 @@ impl<'a> MultiAccountDb<'a> {
         Ok(accounts)
     }
 
-    /// Update account's last_seen_at timestamp.
+    /// Update account's `last_seen_at` timestamp.
+    ///
+    /// # Errors
+    /// Returns an error if the database UPDATE fails.
     pub fn touch_account(&self, id: &str) -> Result<()> {
         self.conn
             .execute(
@@ -493,6 +508,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Update account's credential hash.
+    ///
+    /// # Errors
+    /// Returns an error if the database UPDATE fails.
     pub fn update_credential_hash(&self, id: &str, hash: &str) -> Result<()> {
         self.conn
             .execute(
@@ -504,6 +522,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Deactivate an account.
+    ///
+    /// # Errors
+    /// Returns an error if the database UPDATE fails.
     pub fn deactivate_account(&self, id: &str) -> Result<()> {
         self.conn
             .execute("UPDATE accounts SET is_active = 0 WHERE id = ?1", [id])
@@ -512,6 +533,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Reactivate a deactivated account.
+    ///
+    /// # Errors
+    /// Returns an error if the database UPDATE fails.
     pub fn reactivate_account(&self, id: &str) -> Result<()> {
         self.conn
             .execute(
@@ -523,6 +547,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Update an account's label.
+    ///
+    /// # Errors
+    /// Returns an error if the database UPDATE fails.
     pub fn update_label(&self, id: &str, label: Option<&str>) -> Result<()> {
         self.conn
             .execute(
@@ -534,6 +561,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Update an account's metadata.
+    ///
+    /// # Errors
+    /// Returns an error if the database UPDATE fails.
     pub fn update_metadata(&self, id: &str, metadata: Option<&str>) -> Result<()> {
         self.conn
             .execute(
@@ -548,12 +578,15 @@ impl<'a> MultiAccountDb<'a> {
     ///
     /// Uses (provider, email) as the unique key. On conflict, updates:
     /// - label (if provided in the new account)
-    /// - credential_hash (if provided)
-    /// - last_seen_at (always updated)
-    /// - is_active (set to true)
+    /// - `credential_hash` (if provided)
+    /// - `last_seen_at` (always updated)
+    /// - `is_active` (set to true)
     /// - metadata (if provided)
     ///
     /// Returns the account ID (existing or new).
+    ///
+    /// # Errors
+    /// Returns an error if the find, insert, or update query fails.
     pub fn upsert_account(&self, account: &Account) -> Result<String> {
         // Try to find existing account first
         if let Some(existing) = self.find_account(&account.provider, &account.email)? {
@@ -586,6 +619,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Count accounts, optionally filtered by provider.
+    ///
+    /// # Errors
+    /// Returns an error if the COUNT query fails.
     pub fn count_accounts(&self, provider: Option<&str>) -> Result<i64> {
         let count: i64 = match provider {
             Some(p) => self
@@ -610,6 +646,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// List all accounts including inactive ones.
+    ///
+    /// # Errors
+    /// Returns an error if the database query or row mapping fails.
     pub fn list_all_accounts(&self, provider: Option<&str>) -> Result<Vec<Account>> {
         let mut accounts = Vec::new();
 
@@ -643,8 +682,8 @@ impl<'a> MultiAccountDb<'a> {
                 email: row.get(2)?,
                 label: row.get(3)?,
                 credential_hash: row.get(4)?,
-                added_at: parse_datetime(row.get::<_, String>(5)?),
-                last_seen_at: row.get::<_, Option<String>>(6)?.map(parse_datetime),
+                added_at: parse_datetime(&row.get::<_, String>(5)?),
+                last_seen_at: row.get::<_, Option<String>>(6)?.map(|s| parse_datetime(&s)),
                 is_active: row.get(7)?,
                 metadata: row.get(8)?,
             })
@@ -662,6 +701,10 @@ impl<'a> MultiAccountDb<'a> {
     // ===== Switch Log =====
 
     /// Log an account switch.
+    ///
+    /// # Errors
+    /// Returns an error if the INSERT into the switch log fails.
+    #[allow(clippy::too_many_arguments)]
     pub fn log_switch(
         &self,
         provider: &str,
@@ -693,6 +736,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Get recent switch log entries.
+    ///
+    /// # Errors
+    /// Returns an error if the query or row mapping fails.
     pub fn get_switch_log(&self, limit: i64) -> Result<Vec<SwitchLogEntry>> {
         let mut entries = Vec::new();
 
@@ -711,7 +757,7 @@ impl<'a> MultiAccountDb<'a> {
         let mapped = rows.mapped(|row| {
             Ok(SwitchLogEntry {
                 id: row.get(0)?,
-                timestamp: parse_datetime(row.get::<_, String>(1)?),
+                timestamp: parse_datetime(&row.get::<_, String>(1)?),
                 provider: row.get(2)?,
                 from_account_id: row.get(3)?,
                 to_account_id: row.get(4)?,
@@ -735,6 +781,9 @@ impl<'a> MultiAccountDb<'a> {
     // ===== Provider Health =====
 
     /// Get or create provider health record.
+    ///
+    /// # Errors
+    /// Returns an error if the database query fails.
     pub fn get_provider_health(&self, provider: &str) -> Result<ProviderHealth> {
         let result = self
             .conn
@@ -745,11 +794,11 @@ impl<'a> MultiAccountDb<'a> {
                 |row| {
                     Ok(ProviderHealth {
                         provider: row.get(0)?,
-                        last_success: row.get::<_, Option<String>>(1)?.map(parse_datetime),
-                        last_failure: row.get::<_, Option<String>>(2)?.map(parse_datetime),
+                        last_success: row.get::<_, Option<String>>(1)?.map(|s| parse_datetime(&s)),
+                        last_failure: row.get::<_, Option<String>>(2)?.map(|s| parse_datetime(&s)),
                         consecutive_failures: row.get(3)?,
                         circuit_state: CircuitState::parse(&row.get::<_, String>(4)?),
-                        opened_at: row.get::<_, Option<String>>(5)?.map(parse_datetime),
+                        opened_at: row.get::<_, Option<String>>(5)?.map(|s| parse_datetime(&s)),
                         avg_latency_ms: row.get(6)?,
                         p95_latency_ms: row.get(7)?,
                         total_requests: row.get(8)?,
@@ -775,6 +824,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Record a successful request.
+    ///
+    /// # Errors
+    /// Returns an error if the INSERT or UPDATE on provider health fails.
     pub fn record_success(&self, provider: &str, latency_ms: i32) -> Result<()> {
         self.conn
             .execute(
@@ -795,6 +847,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Record a failed request.
+    ///
+    /// # Errors
+    /// Returns an error if the INSERT or UPDATE on provider health fails.
     pub fn record_failure(&self, provider: &str) -> Result<()> {
         self.conn
             .execute(
@@ -813,6 +868,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Open the circuit breaker for a provider.
+    ///
+    /// # Errors
+    /// Returns an error if the database UPDATE fails.
     pub fn open_circuit(&self, provider: &str) -> Result<()> {
         self.conn
             .execute(
@@ -824,6 +882,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Set circuit to half-open for testing.
+    ///
+    /// # Errors
+    /// Returns an error if the database UPDATE fails.
     pub fn half_open_circuit(&self, provider: &str) -> Result<()> {
         self.conn
             .execute(
@@ -839,6 +900,9 @@ impl<'a> MultiAccountDb<'a> {
     /// Insert a new usage snapshot linked to an account.
     ///
     /// Returns the row ID of the inserted snapshot.
+    ///
+    /// # Errors
+    /// Returns an error if the database INSERT fails.
     pub fn insert_snapshot(&self, snapshot: &NewUsageSnapshot) -> Result<i64> {
         self.conn
             .execute(
@@ -879,6 +943,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Get the latest snapshot for an account.
+    ///
+    /// # Errors
+    /// Returns an error if the database query fails.
     pub fn get_latest_snapshot(&self, account_id: &str) -> Result<Option<UsageSnapshotRecord>> {
         let result = self
             .conn
@@ -904,6 +971,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Get the latest snapshot for each account of a provider.
+    ///
+    /// # Errors
+    /// Returns an error if the database query or row mapping fails.
     pub fn get_latest_snapshots_by_provider(
         &self,
         provider: &str,
@@ -947,6 +1017,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Get snapshots for an account in a time range.
+    ///
+    /// # Errors
+    /// Returns an error if the time range is invalid (`from > to`) or the query fails.
     pub fn get_snapshots_in_range(
         &self,
         account_id: &str,
@@ -993,6 +1066,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Get all snapshots for an account (most recent first, with limit).
+    ///
+    /// # Errors
+    /// Returns an error if the database query or row mapping fails.
     pub fn get_account_snapshots(
         &self,
         account_id: &str,
@@ -1032,6 +1108,9 @@ impl<'a> MultiAccountDb<'a> {
     /// Delete snapshots older than a cutoff date for an account.
     ///
     /// Returns the number of rows deleted.
+    ///
+    /// # Errors
+    /// Returns an error if `retention_days` is non-positive or the DELETE query fails.
     pub fn cleanup_account_snapshots(
         &self,
         account_id: &str,
@@ -1059,6 +1138,9 @@ impl<'a> MultiAccountDb<'a> {
     /// Delete all snapshots for an account.
     ///
     /// Returns the number of rows deleted.
+    ///
+    /// # Errors
+    /// Returns an error if the DELETE query fails.
     pub fn delete_account_snapshots(&self, account_id: &str) -> Result<usize> {
         let deleted = self
             .conn
@@ -1072,6 +1154,9 @@ impl<'a> MultiAccountDb<'a> {
     }
 
     /// Count snapshots for an account.
+    ///
+    /// # Errors
+    /// Returns an error if the COUNT query fails.
     pub fn count_account_snapshots(&self, account_id: &str) -> Result<i64> {
         let count: i64 = self
             .conn
@@ -1092,29 +1177,36 @@ fn map_snapshot_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UsageSnapshotRe
         id: row.get(0)?,
         account_id: row.get(1)?,
         provider: row.get(2)?,
-        fetched_at: parse_datetime(row.get::<_, String>(3)?),
+        fetched_at: parse_datetime(&row.get::<_, String>(3)?),
         trigger_type: SnapshotTrigger::parse(&row.get::<_, String>(4)?),
         source: row.get(5)?,
         primary_used_pct: row.get(6)?,
         primary_window_minutes: row.get(7)?,
-        primary_resets_at: row.get::<_, Option<String>>(8)?.map(parse_datetime),
+        primary_resets_at: row.get::<_, Option<String>>(8)?.map(|s| parse_datetime(&s)),
         secondary_used_pct: row.get(9)?,
         secondary_window_minutes: row.get(10)?,
-        secondary_resets_at: row.get::<_, Option<String>>(11)?.map(parse_datetime),
+        secondary_resets_at: row
+            .get::<_, Option<String>>(11)?
+            .map(|s| parse_datetime(&s)),
         tertiary_used_pct: row.get(12)?,
         tertiary_window_minutes: row.get(13)?,
-        tertiary_resets_at: row.get::<_, Option<String>>(14)?.map(parse_datetime),
+        tertiary_resets_at: row
+            .get::<_, Option<String>>(14)?
+            .map(|s| parse_datetime(&s)),
         cost_today_usd: row.get(15)?,
         cost_mtd_usd: row.get(16)?,
         credits_remaining: row.get(17)?,
         account_email: row.get(18)?,
         account_org: row.get(19)?,
         fetch_duration_ms: row.get(20)?,
-        created_at: row.get::<_, Option<String>>(21)?.map(parse_datetime),
+        created_at: row
+            .get::<_, Option<String>>(21)?
+            .map(|s| parse_datetime(&s)),
     })
 }
 
 /// Generate a UUID v4 (pseudo-random, not cryptographically secure).
+#[allow(clippy::cast_possible_truncation)] // intentional truncation for UUID generation
 fn uuid_v4() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let duration = SystemTime::now()
@@ -1135,10 +1227,8 @@ fn uuid_v4() -> String {
 }
 
 /// Parse ISO8601 datetime string.
-fn parse_datetime(s: String) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(&s)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now())
+fn parse_datetime(s: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(s).map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc))
 }
 
 #[cfg(test)]
@@ -1481,7 +1571,7 @@ mod tests {
         let latest = db.get_latest_snapshot(&account.id).expect("get latest");
         assert!(latest.is_some());
         let latest = latest.unwrap();
-        assert_eq!(latest.account_id, Some(account.id.clone()));
+        assert_eq!(latest.account_id, Some(account.id));
         assert_eq!(latest.provider, "claude");
         assert_eq!(latest.trigger_type, SnapshotTrigger::Switch);
         assert_eq!(latest.primary_used_pct, Some(42.5));
@@ -1557,6 +1647,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_precision_loss)]
     fn test_get_snapshots_in_range() {
         let conn = open_test_db();
         let db = MultiAccountDb::new(&conn);
@@ -1607,6 +1698,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_precision_loss)]
     fn test_get_account_snapshots_with_limit() {
         let conn = open_test_db();
         let db = MultiAccountDb::new(&conn);
@@ -1712,6 +1804,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_precision_loss)]
     fn test_delete_account_snapshots() {
         let conn = open_test_db();
         let db = MultiAccountDb::new(&conn);

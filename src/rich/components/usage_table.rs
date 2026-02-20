@@ -9,16 +9,16 @@ use super::formatters::{format_cost, format_percentage};
 
 /// Convert a provider string to display name using Provider enum if possible.
 fn provider_display_name(provider: &str) -> String {
-    Provider::from_cli_name(provider)
-        .map(|p| p.display_name().to_string())
-        .unwrap_or_else(|_| {
+    Provider::from_cli_name(provider).map_or_else(
+        |_| {
             // Fallback: title case the provider name
             let mut chars = provider.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-            }
-        })
+            chars.next().map_or_else(String::new, |c| {
+                c.to_uppercase().collect::<String>() + chars.as_str()
+            })
+        },
+        |p| p.display_name().to_string(),
+    )
 }
 
 /// A table displaying usage data for multiple providers.
@@ -33,7 +33,7 @@ pub struct UsageTable<'a> {
 impl<'a> UsageTable<'a> {
     /// Create a new usage table.
     #[must_use]
-    pub fn new(providers: &'a [ProviderPayload], theme: &'a ThemeConfig) -> Self {
+    pub const fn new(providers: &'a [ProviderPayload], theme: &'a ThemeConfig) -> Self {
         Self {
             providers,
             theme,
@@ -44,31 +44,31 @@ impl<'a> UsageTable<'a> {
 
     /// Enable totals row.
     #[must_use]
-    pub fn with_totals(mut self) -> Self {
+    pub const fn with_totals(mut self) -> Self {
         self.show_totals = true;
         self
     }
 
     /// Use compact rendering mode.
     #[must_use]
-    pub fn compact(mut self) -> Self {
+    pub const fn compact(mut self) -> Self {
         self.compact = true;
         self
     }
 
     /// Check if the table is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.providers.is_empty()
     }
 
     /// Get the number of providers.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.providers.len()
     }
 
-    /// Build a rich_rust Table with styled content.
+    /// Build a `rich_rust` Table with styled content.
     #[must_use]
     pub fn build_table(&self) -> Table {
         let mut table = Table::new();
@@ -84,33 +84,29 @@ impl<'a> UsageTable<'a> {
                 .usage
                 .primary
                 .as_ref()
-                .map(|w| format_percentage(w.used_percent))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |w| format_percentage(w.used_percent));
 
             let weekly = payload
                 .usage
                 .secondary
                 .as_ref()
-                .map(|w| format_percentage(w.used_percent))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |w| format_percentage(w.used_percent));
 
             let credits = payload
                 .credits
                 .as_ref()
-                .map(|c| format_cost(c.remaining))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |c| format_cost(c.remaining));
 
-            let status = payload
-                .status
-                .as_ref()
-                .map(|s| {
+            let status = payload.status.as_ref().map_or_else(
+                || "—".to_string(),
+                |s| {
                     if s.indicator == StatusIndicator::None {
                         "✓".to_string()
                     } else {
                         "⚠".to_string()
                     }
-                })
-                .unwrap_or_else(|| "—".to_string());
+                },
+            );
 
             table.add_row_cells([provider_name.as_str(), &session, &weekly, &credits, &status]);
         }
@@ -161,45 +157,37 @@ impl<'a> UsageTable<'a> {
                 .usage
                 .primary
                 .as_ref()
-                .map(|w| format_percentage(w.used_percent))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |w| format_percentage(w.used_percent));
 
             let weekly = payload
                 .usage
                 .secondary
                 .as_ref()
-                .map(|w| format_percentage(w.used_percent))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |w| format_percentage(w.used_percent));
 
             let credits = payload
                 .credits
                 .as_ref()
-                .map(|c| format_cost(c.remaining))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |c| format_cost(c.remaining));
 
-            let status_text = payload
-                .status
-                .as_ref()
-                .map(|s| {
-                    if s.indicator == StatusIndicator::None {
-                        "✓"
-                    } else {
-                        "⚠"
-                    }
-                })
-                .unwrap_or("—");
+            let status_text = payload.status.as_ref().map_or("—", |s| {
+                if s.indicator == StatusIndicator::None {
+                    "✓"
+                } else {
+                    "⚠"
+                }
+            });
 
-            let status_style = payload
-                .status
-                .as_ref()
-                .map(|s| {
+            let status_style = payload.status.as_ref().map_or_else(
+                || row_style.clone(),
+                |s| {
                     if s.indicator == StatusIndicator::None {
                         self.theme.status_success.clone()
                     } else {
                         self.theme.status_warning.clone()
                     }
-                })
-                .unwrap_or_else(|| row_style.clone());
+                },
+            );
 
             rows.push(vec![
                 Segment::styled(provider_name, provider_style.clone()),
@@ -237,37 +225,29 @@ impl Renderable for UsageTable<'_> {
                 .usage
                 .primary
                 .as_ref()
-                .map(|w| format_percentage(w.used_percent))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |w| format_percentage(w.used_percent));
 
             let weekly = payload
                 .usage
                 .secondary
                 .as_ref()
-                .map(|w| format_percentage(w.used_percent))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |w| format_percentage(w.used_percent));
 
             let credits = payload
                 .credits
                 .as_ref()
-                .map(|c| format_cost(c.remaining))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |c| format_cost(c.remaining));
 
-            let status = payload
-                .status
-                .as_ref()
-                .map(|s| {
-                    if s.indicator == StatusIndicator::None {
-                        "✓"
-                    } else {
-                        "⚠"
-                    }
-                })
-                .unwrap_or("—");
+            let status = payload.status.as_ref().map_or("—", |s| {
+                if s.indicator == StatusIndicator::None {
+                    "✓"
+                } else {
+                    "⚠"
+                }
+            });
 
             lines.push(format!(
-                "{:<15} {:>10} {:>10} {:>12} {:>8}",
-                provider_name, session, weekly, credits, status
+                "{provider_name:<15} {session:>10} {weekly:>10} {credits:>12} {status:>8}"
             ));
         }
 
@@ -315,37 +295,29 @@ impl Renderable for UsageTable<'_> {
                 .usage
                 .primary
                 .as_ref()
-                .map(|w| format_percentage(w.used_percent))
-                .unwrap_or_else(|| "-".to_string());
+                .map_or_else(|| "-".to_string(), |w| format_percentage(w.used_percent));
 
             let weekly = payload
                 .usage
                 .secondary
                 .as_ref()
-                .map(|w| format_percentage(w.used_percent))
-                .unwrap_or_else(|| "-".to_string());
+                .map_or_else(|| "-".to_string(), |w| format_percentage(w.used_percent));
 
             let credits = payload
                 .credits
                 .as_ref()
-                .map(|c| format_cost(c.remaining))
-                .unwrap_or_else(|| "-".to_string());
+                .map_or_else(|| "-".to_string(), |c| format_cost(c.remaining));
 
-            let status = payload
-                .status
-                .as_ref()
-                .map(|s| {
-                    if s.indicator == StatusIndicator::None {
-                        "[OK]"
-                    } else {
-                        "[!]"
-                    }
-                })
-                .unwrap_or("-");
+            let status = payload.status.as_ref().map_or("-", |s| {
+                if s.indicator == StatusIndicator::None {
+                    "[OK]"
+                } else {
+                    "[!]"
+                }
+            });
 
             lines.push(format!(
-                "{:<15} {:>10} {:>10} {:>12} {:>8}",
-                provider_name, session, weekly, credits, status
+                "{provider_name:<15} {session:>10} {weekly:>10} {credits:>12} {status:>8}"
             ));
         }
 

@@ -43,6 +43,10 @@ pub struct App {
 
 impl App {
     /// Create a new application instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the current instant minus the refresh interval overflows (should not happen in practice).
     #[must_use]
     pub fn new(args: UsageArgs, refresh_interval_secs: u64) -> Self {
         Self {
@@ -52,7 +56,9 @@ impl App {
             selected: 0,
             last_update: None,
             refresh_interval: Duration::from_secs(refresh_interval_secs),
-            last_refresh: Instant::now() - Duration::from_secs(refresh_interval_secs + 1),
+            last_refresh: Instant::now()
+                .checked_sub(Duration::from_secs(refresh_interval_secs + 1))
+                .unwrap(),
             show_help: false,
             should_quit: false,
             refresh_pending: true, // Start with a refresh
@@ -84,7 +90,7 @@ impl App {
                     );
                     frame.render_widget(dashboard, frame.area());
                 })
-                .map_err(|e| CautError::Io(e.into()))?;
+                .map_err(CautError::Io)?;
 
             // Handle events
             match event_handler.next() {
@@ -103,11 +109,8 @@ impl App {
                         self.spawn_fetch(tx.clone());
                     }
                 }
-                Ok(Event::Resize(_, _)) => {
-                    // Terminal will be redrawn on next iteration
-                }
-                Ok(Event::Mouse(_)) => {
-                    // Ignore mouse events for now
+                Ok(Event::Resize(_, _) | Event::Mouse(_)) => {
+                    // Terminal will be redrawn on next iteration; mouse events ignored
                 }
                 Err(e) => {
                     // Log but don't crash on event errors
@@ -154,7 +157,12 @@ impl App {
     }
 
     /// Move selection vertically (assumes 2-column grid by default).
-    fn move_selection_vertical(&mut self, delta: i32) {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss
+    )]
+    const fn move_selection_vertical(&mut self, delta: i32) {
         if self.payloads.is_empty() {
             return;
         }
@@ -170,7 +178,12 @@ impl App {
     }
 
     /// Move selection horizontally.
-    fn move_selection_horizontal(&mut self, delta: i32) {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss
+    )]
+    const fn move_selection_horizontal(&mut self, delta: i32) {
         if self.payloads.is_empty() {
             return;
         }

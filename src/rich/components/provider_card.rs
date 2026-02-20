@@ -11,16 +11,16 @@ use super::usage_bar::UsageBar;
 
 /// Convert a provider string to display name using Provider enum if possible.
 fn provider_display_name(provider: &str) -> String {
-    Provider::from_cli_name(provider)
-        .map(|p| p.display_name().to_string())
-        .unwrap_or_else(|_| {
+    Provider::from_cli_name(provider).map_or_else(
+        |_| {
             // Fallback: title case the provider name
             let mut chars = provider.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-            }
-        })
+            chars.next().map_or_else(String::new, |c| {
+                c.to_uppercase().collect::<String>() + chars.as_str()
+            })
+        },
+        |p| p.display_name().to_string(),
+    )
 }
 
 /// A styled card displaying a provider's usage data.
@@ -34,7 +34,7 @@ pub struct ProviderCard<'a> {
 impl<'a> ProviderCard<'a> {
     /// Create a new provider card.
     #[must_use]
-    pub fn new(payload: &'a ProviderPayload, theme: &'a ThemeConfig) -> Self {
+    pub const fn new(payload: &'a ProviderPayload, theme: &'a ThemeConfig) -> Self {
         Self {
             payload,
             theme,
@@ -44,7 +44,7 @@ impl<'a> ProviderCard<'a> {
 
     /// Use compact rendering mode.
     #[must_use]
-    pub fn compact(mut self) -> Self {
+    pub const fn compact(mut self) -> Self {
         self.compact = true;
         self
     }
@@ -71,7 +71,7 @@ impl<'a> ProviderCard<'a> {
 
         // Label
         segments.push(Segment::styled(
-            format!("{}: ", label),
+            format!("{label}: "),
             self.theme.muted.clone(),
         ));
 
@@ -82,7 +82,7 @@ impl<'a> ProviderCard<'a> {
         // Reset info
         if let Some(desc) = &window.reset_description {
             segments.push(Segment::styled(
-                format!(" ({})", desc),
+                format!(" ({desc})"),
                 self.theme.muted.clone(),
             ));
         } else if let Some(minutes) = window.window_minutes {
@@ -96,19 +96,21 @@ impl<'a> ProviderCard<'a> {
     }
 
     /// Render rate window as plain text.
+    #[allow(clippy::unused_self)] // method for consistent API with render_rate_window_segments
     fn render_rate_window_plain(&self, window: &RateWindow, label: &str) -> String {
         let bar = UsageBar::new(window.used_percent).width(15);
         let bar_str = bar.render_plain();
 
-        let reset_info = if let Some(desc) = &window.reset_description {
-            format!(" ({})", desc)
-        } else if let Some(minutes) = window.window_minutes {
-            format!(" ({})", format_duration_short(minutes))
-        } else {
-            String::new()
-        };
+        let reset_info = window.reset_description.as_ref().map_or_else(
+            || {
+                window.window_minutes.map_or_else(String::new, |minutes| {
+                    format!(" ({})", format_duration_short(minutes))
+                })
+            },
+            |desc| format!(" ({desc})"),
+        );
 
-        format!("{}: {}{}", label, bar_str, reset_info)
+        format!("{label}: {bar_str}{reset_info}")
     }
 
     /// Render the card header as segments.
@@ -156,13 +158,14 @@ impl<'a> ProviderCard<'a> {
         }
 
         // Identity info
-        if let Some(identity) = &self.payload.usage.identity {
-            if let Some(email) = &identity.account_email {
-                let mut id_line = Vec::new();
-                id_line.push(Segment::styled("Account: ", self.theme.muted.clone()));
-                id_line.push(Segment::plain(email.clone()));
-                lines.push(id_line);
-            }
+        if let Some(identity) = &self.payload.usage.identity
+            && let Some(email) = &identity.account_email
+        {
+            let id_line = vec![
+                Segment::styled("Account: ", self.theme.muted.clone()),
+                Segment::plain(email.clone()),
+            ];
+            lines.push(id_line);
         }
 
         // Status info
@@ -199,7 +202,7 @@ impl<'a> ProviderCard<'a> {
         // Build content lines with segments (preserves styling)
         let content_lines = self.render_content_segments();
 
-        let title = Text::new(header.clone());
+        let title = Text::new(header);
         let mut panel = Panel::new(content_lines).title(title);
 
         // Apply provider color to border
@@ -275,10 +278,10 @@ impl Renderable for ProviderCard<'_> {
         }
 
         // Identity
-        if let Some(identity) = &self.payload.usage.identity {
-            if let Some(email) = &identity.account_email {
-                lines.push(format!("Account: {}", email));
-            }
+        if let Some(identity) = &self.payload.usage.identity
+            && let Some(email) = &identity.account_email
+        {
+            lines.push(format!("Account: {email}"));
         }
 
         // Status

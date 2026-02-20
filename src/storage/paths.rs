@@ -17,21 +17,22 @@ impl AppPaths {
     /// Create paths for the caut application.
     #[must_use]
     pub fn new() -> Self {
-        if let Some(proj_dirs) = ProjectDirs::from("com", "steipete", "caut") {
-            Self {
+        ProjectDirs::from("com", "steipete", "caut").map_or_else(
+            || {
+                // Fallback to home directory
+                let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+                Self {
+                    config: home.join(".config/caut"),
+                    cache: home.join(".cache/caut"),
+                    data: home.join(".local/share/caut"),
+                }
+            },
+            |proj_dirs| Self {
                 config: proj_dirs.config_dir().to_path_buf(),
                 cache: proj_dirs.cache_dir().to_path_buf(),
                 data: proj_dirs.data_dir().to_path_buf(),
-            }
-        } else {
-            // Fallback to home directory
-            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            Self {
-                config: home.join(".config/caut"),
-                cache: home.join(".cache/caut"),
-                data: home.join(".local/share/caut"),
-            }
-        }
+            },
+        )
     }
 
     /// Path to token accounts file.
@@ -42,7 +43,7 @@ impl AppPaths {
 
     /// Path to CodexBar-compatible token accounts file (macOS only).
     #[must_use]
-    pub fn codexbar_token_accounts_file() -> Option<PathBuf> {
+    pub const fn codexbar_token_accounts_file() -> Option<PathBuf> {
         #[cfg(target_os = "macos")]
         {
             dirs::home_dir()
@@ -54,7 +55,7 @@ impl AppPaths {
         }
     }
 
-    /// Path to OpenAI dashboard cache.
+    /// Path to `OpenAI` dashboard cache.
     #[must_use]
     pub fn openai_dashboard_cache(&self) -> PathBuf {
         self.cache.join("openai-dashboard.json")
@@ -63,7 +64,7 @@ impl AppPaths {
     /// Path to cost usage cache for a provider.
     #[must_use]
     pub fn cost_usage_cache(&self, provider: &str) -> PathBuf {
-        self.cache.join(format!("cost-usage/{}-v1.json", provider))
+        self.cache.join(format!("cost-usage/{provider}-v1.json"))
     }
 
     /// Path to history database file.
@@ -79,6 +80,9 @@ impl AppPaths {
     }
 
     /// Ensure all directories exist.
+    ///
+    /// # Errors
+    /// Returns an error if any directory cannot be created.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.config)?;
         std::fs::create_dir_all(&self.cache)?;

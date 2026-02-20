@@ -8,6 +8,10 @@ use crate::error::{CautError, Result};
 use crate::render::{human, robot};
 
 /// Execute the cost command.
+///
+/// # Errors
+/// Returns an error if no selected providers support cost scanning, if
+/// the cost scan fails, or if output serialization fails.
 pub async fn execute(
     args: &CostArgs,
     format: OutputFormat,
@@ -62,11 +66,11 @@ pub async fn execute(
     match format {
         OutputFormat::Human => {
             let output = human::render_cost(&results, no_color)?;
-            print!("{}", output);
+            print!("{output}");
 
             // Print errors to stderr
             for error in &errors {
-                eprintln!("Error: {}", error);
+                eprintln!("Error: {error}");
             }
         }
         OutputFormat::Json => {
@@ -76,18 +80,18 @@ pub async fn execute(
             } else {
                 serde_json::to_string(&robot_output)
             }
-            .map_err(|e| CautError::Config(format!("Failed to serialize JSON: {}", e)))?;
-            println!("{}", json);
+            .map_err(|e| CautError::Config(format!("Failed to serialize JSON: {e}")))?;
+            println!("{json}");
         }
         OutputFormat::Md => {
             let output = robot::render_markdown_cost(&results)?;
-            print!("{}", output);
+            print!("{output}");
 
             // Print errors as markdown
             if !errors.is_empty() {
                 println!("\n## Errors\n");
                 for error in &errors {
-                    println!("- {}", error);
+                    println!("- {error}");
                 }
             }
         }

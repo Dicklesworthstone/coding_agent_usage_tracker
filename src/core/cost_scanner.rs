@@ -49,7 +49,7 @@ struct CodexEvent {
 
 /// Cost scanner for local usage data.
 pub struct CostScanner {
-    #[expect(dead_code, reason = "reserved for future path-based scanning")]
+    #[allow(dead_code)] // reserved for future path-based scanning
     paths: AppPaths,
 }
 
@@ -63,6 +63,10 @@ impl CostScanner {
     }
 
     /// Scan cost data for a provider.
+    ///
+    /// # Errors
+    /// Returns an error if the provider does not support local cost scanning
+    /// or if the stats cache or session files cannot be read.
     pub async fn scan(&self, provider: Provider, _refresh: bool) -> Result<CostPayload> {
         match provider {
             Provider::Claude => self.scan_claude().await,
@@ -90,10 +94,10 @@ impl CostScanner {
         tracing::debug!(?stats_path, "Reading Claude stats cache");
 
         let file = File::open(&stats_path)
-            .map_err(|e| CautError::Config(format!("Failed to open Claude stats cache: {}", e)))?;
+            .map_err(|e| CautError::Config(format!("Failed to open Claude stats cache: {e}")))?;
 
         let stats: ClaudeStatsCache = serde_json::from_reader(file).map_err(|e| {
-            CautError::ParseResponse(format!("Failed to parse Claude stats cache: {}", e))
+            CautError::ParseResponse(format!("Failed to parse Claude stats cache: {e}"))
         })?;
 
         // Filter to last 30 days
@@ -198,8 +202,7 @@ impl CostScanner {
                                 if let Ok(files) = std::fs::read_dir(&day_path) {
                                     for file_entry in files.flatten() {
                                         let file_path = file_entry.path();
-                                        if file_path.extension().map_or(false, |ext| ext == "jsonl")
-                                        {
+                                        if file_path.extension().is_some_and(|ext| ext == "jsonl") {
                                             self.scan_codex_jsonl(
                                                 &file_path,
                                                 &cutoff_date,
@@ -267,6 +270,7 @@ impl CostScanner {
     }
 
     /// Scan a Codex JSONL session file.
+    #[allow(clippy::unused_self)]
     fn scan_codex_jsonl(
         &self,
         path: &PathBuf,
@@ -285,10 +289,7 @@ impl CostScanner {
         let mut recent_lines: VecDeque<String> = VecDeque::with_capacity(100);
 
         for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
+            let Ok(line) = line else { continue };
 
             if line.is_empty() {
                 continue;
@@ -307,24 +308,27 @@ impl CostScanner {
             };
 
             // Extract date from timestamp
-            if let Some(date) = event.timestamp.get(..10) {
-                if date >= cutoff_date {
-                    daily_counts
-                        .entry(date.to_string())
-                        .or_insert_with(DailyCount::default)
-                        .events += 1;
-                }
+            if let Some(date) = event.timestamp.get(..10)
+                && date >= cutoff_date
+            {
+                daily_counts.entry(date.to_string()).or_default().events += 1;
             }
         }
     }
 
     /// Scan Codex history.jsonl for session counts.
+    #[allow(clippy::unused_self)]
     fn scan_codex_history(
         &self,
         path: &PathBuf,
         cutoff_date: &str,
         daily_counts: &mut HashMap<String, DailyCount>,
     ) {
+        #[derive(Deserialize)]
+        struct HistoryEntry {
+            ts: i64,
+        }
+
         let file = match File::open(path) {
             Ok(f) => f,
             Err(e) => {
@@ -336,21 +340,13 @@ impl CostScanner {
         let reader = BufReader::new(file);
 
         for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
+            let Ok(line) = line else { continue };
 
             if line.is_empty() {
                 continue;
             }
 
             // History format: {"session_id": "...", "ts": 1234567890, "text": "..."}
-            #[derive(Deserialize)]
-            struct HistoryEntry {
-                ts: i64,
-            }
-
             let entry: HistoryEntry = match serde_json::from_str(&line) {
                 Ok(e) => e,
                 Err(_) => continue,
@@ -360,16 +356,14 @@ impl CostScanner {
             if let Some(dt) = DateTime::from_timestamp(entry.ts, 0) {
                 let date = dt.format("%Y-%m-%d").to_string();
                 if date.as_str() >= cutoff_date {
-                    daily_counts
-                        .entry(date)
-                        .or_insert_with(DailyCount::default)
-                        .events += 1;
+                    daily_counts.entry(date).or_default().events += 1;
                 }
             }
         }
     }
 
     /// Create an empty cost payload for a provider.
+    #[allow(clippy::unused_self)]
     fn empty_cost_payload(&self, provider: &str) -> CostPayload {
         CostPayload {
             provider: provider.to_string(),
@@ -409,6 +403,7 @@ mod dirs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write;
     use tempfile::TempDir;
 
     // =========================================================================
@@ -419,7 +414,6 @@ mod tests {
     fn test_cost_scanner_new() {
         let scanner = CostScanner::new();
         // Just verify it creates without panic
-        assert!(true);
         // Using scanner to avoid warning
         let _ = scanner.paths;
     }
@@ -624,10 +618,11 @@ not valid json at all
         // Create 150 lines
         let mut content = String::new();
         for i in 0..150 {
-            content.push_str(&format!(
+            let _ = write!(
+                content,
                 r#"{{"timestamp": "2026-01-18T10:{:02}:00Z", "type": "message"}}"#,
                 i % 60
-            ));
+            );
             content.push('\n');
         }
 
@@ -660,9 +655,9 @@ not valid json at all
         scanner.scan_codex_jsonl(&file_path, "2025-12-15", &mut daily_counts);
 
         assert_eq!(daily_counts.len(), 2); // 2026-01-18 and 2025-12-20
-        assert!(daily_counts.get("2026-01-18").is_some());
-        assert!(daily_counts.get("2025-12-20").is_some());
-        assert!(daily_counts.get("2025-06-01").is_none()); // Before cutoff
+        assert!(daily_counts.contains_key("2026-01-18"));
+        assert!(daily_counts.contains_key("2025-12-20"));
+        assert!(!daily_counts.contains_key("2025-06-01")); // Before cutoff
     }
 
     #[test]
@@ -795,7 +790,7 @@ not valid json
         let old_date = "2025-12-01";
 
         assert!(recent_date >= cutoff);
-        assert!(!(old_date >= cutoff));
+        assert!((old_date < cutoff));
     }
 
     #[test]

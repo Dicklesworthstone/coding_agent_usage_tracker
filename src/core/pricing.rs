@@ -1,7 +1,7 @@
 //! Pricing data and cost calculation for session usage.
 //!
 //! This module provides model pricing information and calculates costs from
-//! session token usage data parsed by the session_logs module.
+//! session token usage data parsed by the `session_logs` module.
 
 use crate::core::session_logs::SessionUsage;
 use chrono::{DateTime, Utc};
@@ -59,6 +59,7 @@ impl ModelPricing {
 
     /// Calculate cost for given token counts.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)] // token counts fit within f64 precision
     pub fn calculate_cost(
         &self,
         input: i64,
@@ -111,8 +112,8 @@ impl PricingTable {
     /// Create a pricing table with current (January 2026) pricing.
     ///
     /// Pricing sources:
-    /// - Anthropic: https://www.anthropic.com/pricing
-    /// - OpenAI: https://openai.com/pricing
+    /// - Anthropic: <https://www.anthropic.com/pricing>
+    /// - `OpenAI`: <https://openai.com/pricing>
     #[must_use]
     pub fn current() -> Self {
         let mut models = HashMap::new();
@@ -264,18 +265,19 @@ impl PricingTable {
     /// If the model is unknown, returns mid-tier pricing as a fallback.
     #[must_use]
     pub fn get_or_estimate(&self, model: &str) -> (ModelPricing, bool) {
-        if let Some(pricing) = self.get(model) {
-            (pricing.clone(), true)
-        } else {
-            // Conservative mid-tier estimate for unknown models
-            let estimated = ModelPricing::from_static(
-                model, 3.0,  // input: assume Sonnet-tier
-                15.0, // output: assume Sonnet-tier
-                0.3,  // cache read
-                3.75, // cache creation
-            );
-            (estimated, false)
-        }
+        self.get(model).map_or_else(
+            || {
+                // Conservative mid-tier estimate for unknown models
+                let estimated = ModelPricing::from_static(
+                    model, 3.0,  // input: assume Sonnet-tier
+                    15.0, // output: assume Sonnet-tier
+                    0.3,  // cache read
+                    3.75, // cache creation
+                );
+                (estimated, false)
+            },
+            |pricing| (pricing.clone(), true),
+        )
     }
 
     /// Get all known model names.
@@ -398,11 +400,11 @@ impl SessionCostCalculator {
         let mut best_output_rate = 0.0;
 
         for model in &usage.models_used {
-            if let Some(pricing) = self.pricing.get(model) {
-                if pricing.output_per_million > best_output_rate {
-                    best_output_rate = pricing.output_per_million;
-                    best_model = Some(model.clone());
-                }
+            if let Some(pricing) = self.pricing.get(model)
+                && pricing.output_per_million > best_output_rate
+            {
+                best_output_rate = pricing.output_per_million;
+                best_model = Some(model.clone());
             }
         }
 

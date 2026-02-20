@@ -1,4 +1,4 @@
-//! Codex (OpenAI) provider implementation.
+//! Codex (`OpenAI`) provider implementation.
 //!
 //! Supports:
 //! - Web dashboard scraping (macOS only)
@@ -102,7 +102,7 @@ struct CodexAuthTokens {
     account_id: Option<String>,
 }
 
-/// JWT claims from the id_token (decoded from base64).
+/// JWT claims from the `id_token` (decoded from base64).
 /// Contains OpenAI-specific auth information.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -122,7 +122,7 @@ struct JwtClaims {
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct OpenAiAuthClaims {
-    /// ChatGPT account ID
+    /// `ChatGPT` account ID
     #[serde(default)]
     chatgpt_account_id: Option<String>,
     /// Plan type (e.g., "pro", "plus", "free")
@@ -175,9 +175,7 @@ fn read_local_auth() -> Option<CodexAuthJson> {
 
 /// Check if user is authenticated with Codex
 fn is_authenticated() -> bool {
-    read_local_auth()
-        .map(|auth| auth.openai_api_key.is_some() || auth.tokens.is_some())
-        .unwrap_or(false)
+    read_local_auth().is_some_and(|auth| auth.openai_api_key.is_some() || auth.tokens.is_some())
 }
 
 /// Decode JWT payload (the middle part between the two dots).
@@ -202,12 +200,9 @@ fn decode_jwt_payload(token: &str) -> Option<JwtClaims> {
     }
 
     // Decode base64
-    let decoded = match base64_decode(&payload_std) {
-        Some(d) => d,
-        None => {
-            tracing::debug!("Failed to decode JWT payload as base64");
-            return None;
-        }
+    let Some(decoded) = base64_decode(&payload_std) else {
+        tracing::debug!("Failed to decode JWT payload as base64");
+        return None;
     };
 
     // Parse JSON
@@ -234,12 +229,16 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
         }
 
         let value = ALPHABET.iter().position(|&x| x == c)?;
-        buffer = (buffer << 6) | (value as u32);
+        #[allow(clippy::cast_possible_truncation)] // base64 index fits in u32
+        let value_u32 = value as u32;
+        buffer = (buffer << 6) | value_u32;
         bits_collected += 6;
 
         if bits_collected >= 8 {
             bits_collected -= 8;
-            result.push((buffer >> bits_collected) as u8);
+            #[allow(clippy::cast_possible_truncation)] // intentionally extracting low byte
+            let byte = (buffer >> bits_collected) as u8;
+            result.push(byte);
             buffer &= (1 << bits_collected) - 1;
         }
     }
@@ -253,41 +252,41 @@ fn get_local_identity() -> Option<(ProviderIdentity, Option<SubscriptionInfo>)> 
 
     // Try to extract from JWT token first
     if let Some(tokens) = &auth.tokens {
-        if let Some(id_token) = &tokens.id_token {
-            if let Some(claims) = decode_jwt_payload(id_token) {
-                let openai_auth = claims.openai_auth.as_ref();
+        if let Some(id_token) = &tokens.id_token
+            && let Some(claims) = decode_jwt_payload(id_token)
+        {
+            let openai_auth = claims.openai_auth.as_ref();
 
-                // Extract organization name from default org
-                let org_name = openai_auth.and_then(|a| {
-                    a.organizations.as_ref().and_then(|orgs| {
-                        orgs.iter()
-                            .find(|o| o.is_default == Some(true))
-                            .and_then(|o| o.title.clone())
-                    })
-                });
+            // Extract organization name from default org
+            let org_name = openai_auth.and_then(|a| {
+                a.organizations.as_ref().and_then(|orgs| {
+                    orgs.iter()
+                        .find(|o| o.is_default == Some(true))
+                        .and_then(|o| o.title.clone())
+                })
+            });
 
-                let identity = ProviderIdentity {
-                    account_email: claims.email.clone(),
-                    account_organization: org_name,
-                    login_method: Some("oauth".to_string()),
-                };
+            let identity = ProviderIdentity {
+                account_email: claims.email.clone(),
+                account_organization: org_name,
+                login_method: Some("oauth".to_string()),
+            };
 
-                // Extract subscription info
-                let subscription = openai_auth.map(|a| SubscriptionInfo {
-                    plan_type: a.chatgpt_plan_type.clone(),
-                    active_start: a.chatgpt_subscription_active_start.clone(),
-                    active_until: a.chatgpt_subscription_active_until.clone(),
-                    last_checked: a.chatgpt_subscription_last_checked.clone(),
-                });
+            // Extract subscription info
+            let subscription = openai_auth.map(|a| SubscriptionInfo {
+                plan_type: a.chatgpt_plan_type.clone(),
+                active_start: a.chatgpt_subscription_active_start.clone(),
+                active_until: a.chatgpt_subscription_active_until.clone(),
+                last_checked: a.chatgpt_subscription_last_checked.clone(),
+            });
 
-                tracing::debug!(
-                    email = ?claims.email,
-                    plan = ?openai_auth.and_then(|a| a.chatgpt_plan_type.as_ref()),
-                    "Extracted identity from JWT"
-                );
+            tracing::debug!(
+                email = ?claims.email,
+                plan = ?openai_auth.and_then(|a| a.chatgpt_plan_type.as_ref()),
+                "Extracted identity from JWT"
+            );
 
-                return Some((identity, subscription));
-            }
+            return Some((identity, subscription));
         }
 
         // Fallback: just return account_id if available
@@ -381,6 +380,10 @@ struct CodexUser {
 /// Fetch usage via web dashboard.
 ///
 /// This requires macOS with browser cookies available.
+///
+/// # Errors
+/// Returns an error if web dashboard scraping is not supported on the current
+/// platform or if the scraping operation fails.
 pub async fn fetch_web_dashboard() -> Result<UsageSnapshot> {
     #[cfg(not(target_os = "macos"))]
     {
@@ -411,7 +414,11 @@ pub async fn fetch_web_dashboard() -> Result<UsageSnapshot> {
 /// the user's plan type and subscription status.
 ///
 /// Note: The Codex CLI doesn't expose rate limit commands directly.
-/// Rate limit data would need to come from OpenAI API or web dashboard.
+/// Rate limit data would need to come from `OpenAI` API or web dashboard.
+///
+/// # Errors
+/// Returns an error if the CLI is unavailable or the rate limit response
+/// cannot be parsed.
 pub async fn fetch_cli() -> Result<UsageSnapshot> {
     // First check version to confirm CLI is working
     let version = get_cli_version().await.ok();
@@ -426,32 +433,29 @@ pub async fn fetch_cli() -> Result<UsageSnapshot> {
 
     // Try JSON output if available (Codex CLI may add rate-limit commands in the future)
     if let Ok(response) = try_json_rate_limit().await {
-        return parse_rate_limit_response(response, version);
+        return Ok(parse_rate_limit_response(&response, version));
     }
 
     // Extract identity from local auth.json (includes JWT decoding)
-    let (identity, subscription) = match get_local_identity() {
-        Some((id, sub)) => {
-            tracing::debug!(
-                email = ?id.account_email,
-                org = ?id.account_organization,
-                login_method = ?id.login_method,
-                plan = ?sub.as_ref().and_then(|s| s.plan_type.as_ref()),
-                "Extracted identity from local auth.json"
-            );
-            (Some(id), sub)
-        }
-        None => {
-            tracing::debug!("No identity found in local auth.json");
-            (
-                Some(ProviderIdentity {
-                    account_email: None,
-                    account_organization: None,
-                    login_method: Some("cli-unauthenticated".to_string()),
-                }),
-                None,
-            )
-        }
+    let (identity, subscription) = if let Some((id, sub)) = get_local_identity() {
+        tracing::debug!(
+            email = ?id.account_email,
+            org = ?id.account_organization,
+            login_method = ?id.login_method,
+            plan = ?sub.as_ref().and_then(|s| s.plan_type.as_ref()),
+            "Extracted identity from local auth.json"
+        );
+        (Some(id), sub)
+    } else {
+        tracing::debug!("No identity found in local auth.json");
+        (
+            Some(ProviderIdentity {
+                account_email: None,
+                account_organization: None,
+                login_method: Some("cli-unauthenticated".to_string()),
+            }),
+            None,
+        )
     };
 
     // Log subscription info if available
@@ -498,11 +502,11 @@ async fn try_json_rate_limit() -> Result<CodexRateLimitResponse> {
     })
 }
 
-/// Parse rate limit response into UsageSnapshot.
+/// Parse rate limit response into `UsageSnapshot`.
 fn parse_rate_limit_response(
-    response: CodexRateLimitResponse,
+    response: &CodexRateLimitResponse,
     _version: Option<String>,
-) -> Result<UsageSnapshot> {
+) -> UsageSnapshot {
     let now = Utc::now();
 
     let primary = response.rate_limit.as_ref().and_then(|rl| {
@@ -535,13 +539,13 @@ fn parse_rate_limit_response(
         login_method: Some("cli".to_string()),
     });
 
-    Ok(UsageSnapshot {
+    UsageSnapshot {
         primary,
         secondary,
         tertiary: None,
         updated_at: now,
         identity,
-    })
+    }
 }
 
 /// Get the CLI version.
@@ -552,7 +556,6 @@ async fn get_cli_version() -> Result<String> {
         // Parse version from output like "codex 0.6.0" or "0.6.0"
         let version = output
             .stdout
-            .trim()
             .split_whitespace()
             .last()
             .unwrap_or("unknown")
@@ -567,18 +570,20 @@ async fn get_cli_version() -> Result<String> {
 }
 
 /// Get credits information.
+///
+/// # Errors
+/// Returns an error if the credits data cannot be fetched from the CLI.
 pub async fn fetch_credits() -> Result<CreditsSnapshot> {
     // Try to get credits from the CLI
-    if let Ok(response) = try_json_rate_limit().await {
-        if let Some(credits) = response.credits {
-            if let Some(remaining) = credits.remaining {
-                return Ok(CreditsSnapshot {
-                    remaining,
-                    events: vec![],
-                    updated_at: Utc::now(),
-                });
-            }
-        }
+    if let Ok(response) = try_json_rate_limit().await
+        && let Some(credits) = response.credits
+        && let Some(remaining) = credits.remaining
+    {
+        return Ok(CreditsSnapshot {
+            remaining,
+            events: vec![],
+            updated_at: Utc::now(),
+        });
     }
 
     Err(CautError::FetchFailed {
@@ -689,7 +694,7 @@ mod tests {
             }),
         };
 
-        let snapshot = parse_rate_limit_response(response, None).expect("snapshot");
+        let snapshot = parse_rate_limit_response(&response, None);
         let primary = snapshot.primary.expect("primary");
         let secondary = snapshot.secondary.expect("secondary");
 
@@ -783,7 +788,7 @@ mod tests {
     #[test]
     fn decode_jwt_payload_minimal_claims() {
         let header = base64_url_encode(r#"{"alg":"none"}"#);
-        let payload = base64_url_encode(r#"{}"#);
+        let payload = base64_url_encode(r"{}");
         let token = format!("{header}.{payload}.signature");
 
         let claims = decode_jwt_payload(&token).expect("claims");
@@ -834,7 +839,7 @@ mod tests {
             user: None,
         };
 
-        let snapshot = parse_rate_limit_response(response, None).expect("snapshot");
+        let snapshot = parse_rate_limit_response(&response, None);
         assert!(snapshot.primary.is_none());
         assert!(snapshot.secondary.is_none());
         assert!(snapshot.tertiary.is_none());
@@ -856,7 +861,7 @@ mod tests {
             user: None,
         };
 
-        let snapshot = parse_rate_limit_response(response, None).expect("snapshot");
+        let snapshot = parse_rate_limit_response(&response, None);
         let primary = snapshot.primary.expect("primary");
         assert!((primary.used_percent - 25.0).abs() < f64::EPSILON);
         assert!(primary.resets_at.is_none());
@@ -876,7 +881,7 @@ mod tests {
             user: None,
         };
 
-        let snapshot = parse_rate_limit_response(response, None).expect("snapshot");
+        let snapshot = parse_rate_limit_response(&response, None);
         assert!(snapshot.primary.is_none());
         let secondary = snapshot.secondary.expect("secondary");
         assert!((secondary.used_percent - 50.0).abs() < f64::EPSILON);
@@ -897,7 +902,7 @@ mod tests {
             user: None,
         };
 
-        let snapshot = parse_rate_limit_response(response, None).expect("snapshot");
+        let snapshot = parse_rate_limit_response(&response, None);
         let primary = snapshot.primary.expect("primary");
         assert!((primary.used_percent - 20.0).abs() < f64::EPSILON);
         // Invalid timestamp should result in None
@@ -918,7 +923,7 @@ mod tests {
             user: None,
         };
 
-        let snapshot = parse_rate_limit_response(response, None).expect("snapshot");
+        let snapshot = parse_rate_limit_response(&response, None);
         let primary = snapshot.primary.expect("primary");
         let secondary = snapshot.secondary.expect("secondary");
         assert!((primary.used_percent - 100.0).abs() < f64::EPSILON);
@@ -1031,7 +1036,7 @@ mod tests {
 
     #[test]
     fn parse_auth_json_empty() {
-        let json = r#"{}"#;
+        let json = r"{}";
         let auth: CodexAuthJson = serde_json::from_str(json).expect("parse");
         assert!(auth.openai_api_key.is_none());
         assert!(auth.tokens.is_none());

@@ -28,6 +28,9 @@ pub fn build_client(timeout: Duration) -> Result<Client> {
 }
 
 /// Get or create a default HTTP client.
+///
+/// # Errors
+/// Returns an error if the HTTP client cannot be constructed.
 pub fn default_client() -> Result<Client> {
     build_client(DEFAULT_TIMEOUT)
 }

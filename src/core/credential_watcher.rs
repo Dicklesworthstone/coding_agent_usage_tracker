@@ -320,14 +320,13 @@ impl CredentialWatcher {
     pub fn is_watching(&self, provider: Provider) -> bool {
         self.watched
             .lock()
-            .map(|state| state.values().any(|w| w.provider == provider))
-            .unwrap_or(false)
+            .is_ok_and(|state| state.values().any(|w| w.provider == provider))
     }
 
     /// Get the number of paths being watched.
     #[must_use]
     pub fn watch_count(&self) -> usize {
-        self.watched.lock().map(|state| state.len()).unwrap_or(0)
+        self.watched.lock().map_or(0, |state| state.len())
     }
 
     /// Process a filesystem event and determine the change type.
@@ -611,7 +610,7 @@ mod tests {
         let event = watcher.process_change(&path).expect("process");
 
         // Should detect no change since we exclude volatile fields
-        assert!(matches!(event, None));
+        assert!(event.is_none());
     }
 
     #[test]

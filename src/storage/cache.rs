@@ -59,7 +59,7 @@ impl Staleness {
         }
     }
 
-    /// Check if the data is usable (Fresh, Stale, or VeryStale).
+    /// Check if the data is usable (Fresh, Stale, or `VeryStale`).
     #[must_use]
     pub const fn is_usable(&self) -> bool {
         !matches!(self, Self::Missing)
@@ -108,15 +108,17 @@ impl CacheMetrics {
     /// Record a read operation.
     pub fn record_read(&self, duration: Duration) {
         self.reads.fetch_add(1, Ordering::Relaxed);
-        self.read_time_us
-            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+        #[allow(clippy::cast_possible_truncation)] // duration in micros always fits in u64
+        let micros = duration.as_micros() as u64;
+        self.read_time_us.fetch_add(micros, Ordering::Relaxed);
     }
 
     /// Record a write operation.
     pub fn record_write(&self, duration: Duration) {
         self.writes.fetch_add(1, Ordering::Relaxed);
-        self.write_time_us
-            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+        #[allow(clippy::cast_possible_truncation)] // duration in micros always fits in u64
+        let micros = duration.as_micros() as u64;
+        self.write_time_us.fetch_add(micros, Ordering::Relaxed);
     }
 
     /// Get average read time in microseconds.
@@ -144,6 +146,7 @@ impl CacheMetrics {
 pub static CACHE_METRICS: CacheMetrics = CacheMetrics::new();
 
 /// Check if a cache file is fresh (exists and not expired).
+#[must_use]
 pub fn is_fresh(path: &Path, max_age: Duration) -> bool {
     if !path.exists() {
         return false;
@@ -151,13 +154,11 @@ pub fn is_fresh(path: &Path, max_age: Duration) -> bool {
 
     path.metadata()
         .and_then(|m| m.modified())
-        .map(|modified| {
+        .is_ok_and(|modified| {
             SystemTime::now()
                 .duration_since(modified)
-                .map(|age| age < max_age)
-                .unwrap_or(false)
+                .is_ok_and(|age| age < max_age)
         })
-        .unwrap_or(false)
 }
 
 /// Get the age of a cache file in seconds.
@@ -178,6 +179,9 @@ pub fn get_staleness(path: &Path) -> Staleness {
 
 /// Read cached data if fresh.
 /// Optimized for speed - reads synchronously and parses JSON.
+///
+/// # Errors
+/// Returns an error if the file cannot be read or the JSON content cannot be deserialized.
 pub fn read_if_fresh<T: DeserializeOwned>(path: &Path, max_age: Duration) -> Result<Option<T>> {
     if !is_fresh(path, max_age) {
         return Ok(None);
@@ -188,6 +192,9 @@ pub fn read_if_fresh<T: DeserializeOwned>(path: &Path, max_age: Duration) -> Res
 
 /// Read cached data regardless of freshness.
 /// Returns the data along with its staleness level.
+///
+/// # Errors
+/// Returns an error if the file cannot be read or the JSON content cannot be deserialized.
 pub fn read_with_staleness<T: DeserializeOwned>(path: &Path) -> Result<Option<(T, Staleness)>> {
     let staleness = get_staleness(path);
     if !staleness.is_usable() {
@@ -217,6 +224,10 @@ fn read_fast<T: DeserializeOwned>(path: &Path) -> Result<T> {
 
 /// Write data to cache atomically.
 /// Uses temp file + rename to prevent corruption.
+///
+/// # Errors
+/// Returns an error if the parent directory cannot be created, serialization fails,
+/// or the atomic write (temp file + rename) fails.
 pub fn write<T: Serialize>(path: &Path, data: &T) -> Result<()> {
     let start = Instant::now();
 
@@ -241,7 +252,7 @@ pub fn write<T: Serialize>(path: &Path, data: &T) -> Result<()> {
 /// This prevents corruption if the process is interrupted during write.
 fn write_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
     // Create temp file in same directory (required for atomic rename)
-    let parent = path.parent().unwrap_or(Path::new("."));
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let temp_path = parent.join(format!(
         ".{}.tmp.{}",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("cache"),
@@ -318,6 +329,7 @@ impl OfflineCacheEntry {
     #[must_use]
     pub fn age(&self) -> Duration {
         let age = Utc::now() - self.cached_at;
+        #[allow(clippy::cast_sign_loss)] // clamped to non-negative
         Duration::from_secs(age.num_seconds().max(0) as u64)
     }
 
@@ -335,14 +347,11 @@ impl OfflineCacheEntry {
         let ttl_secs = self.ttl_seconds.max(1);
 
         let stale_limit = config.stale_threshold_secs(ttl_secs);
-        let very_stale_limit = config.very_stale_threshold_secs(ttl_secs);
 
         if age_secs <= ttl_secs {
             CacheStaleness::Fresh { age }
         } else if age_secs <= stale_limit {
             CacheStaleness::Stale { age }
-        } else if age_secs <= very_stale_limit {
-            CacheStaleness::VeryStale { age }
         } else {
             CacheStaleness::VeryStale { age }
         }
@@ -409,10 +418,23 @@ impl OfflineCacheConfig {
         self
     }
 
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    // precision loss acceptable for threshold calculation; result is non-negative and fits u64
     fn stale_threshold_secs(&self, ttl_secs: u64) -> u64 {
         ((ttl_secs as f64) * self.stale_threshold_multiplier.max(1.0)).round() as u64
     }
 
+    #[allow(dead_code)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    // precision loss acceptable for threshold calculation; result is non-negative and fits u64
     fn very_stale_threshold_secs(&self, ttl_secs: u64) -> u64 {
         ((ttl_secs as f64) * self.very_stale_threshold_multiplier.max(1.0)).round() as u64
     }
@@ -422,6 +444,12 @@ impl OfflineCacheConfig {
 pub struct OfflineCache {
     cache_dir: PathBuf,
     config: OfflineCacheConfig,
+}
+
+impl Default for OfflineCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OfflineCache {
@@ -455,6 +483,7 @@ impl OfflineCache {
     }
 
     /// Read cached entry for a provider (gracefully returns None on missing/corrupt).
+    #[must_use]
     pub fn get(&self, provider: &str) -> Option<OfflineCacheEntry> {
         let path = self.cache_path(provider);
         let content = std::fs::read_to_string(&path).ok()?;
@@ -462,6 +491,7 @@ impl OfflineCache {
     }
 
     /// Read cached entry with computed staleness.
+    #[must_use]
     pub fn get_with_staleness(
         &self,
         provider: &str,
@@ -472,11 +502,17 @@ impl OfflineCache {
     }
 
     /// Write a provider payload to cache with default TTL and source.
+    ///
+    /// # Errors
+    /// Returns an error if the cache entry cannot be serialized or written to disk.
     pub fn set(&self, provider: &str, payload: &ProviderPayload) -> Result<OfflineCacheEntry> {
         self.set_with_source(provider, payload, CacheSource::NetworkFetch)
     }
 
     /// Write a provider payload to cache with a custom source.
+    ///
+    /// # Errors
+    /// Returns an error if the cache entry cannot be serialized or written to disk.
     pub fn set_with_source(
         &self,
         provider: &str,
@@ -495,6 +531,9 @@ impl OfflineCache {
     }
 
     /// Write a pre-built cache entry (useful for tests).
+    ///
+    /// # Errors
+    /// Returns an error if the entry cannot be serialized or written to disk.
     pub fn write_entry(&self, provider: &str, entry: &OfflineCacheEntry) -> Result<()> {
         let path = self.cache_path(provider);
         write(&path, entry)
@@ -507,7 +546,7 @@ impl OfflineCache {
             .ok()
             .into_iter()
             .flatten()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.path().extension() == Some("json".as_ref()))
             .filter_map(|e| {
                 e.path()
@@ -521,6 +560,9 @@ impl OfflineCache {
     }
 
     /// Clear cache for a provider.
+    ///
+    /// # Errors
+    /// Returns an error if the cache file exists but cannot be removed.
     pub fn clear(&self, provider: &str) -> Result<()> {
         let path = self.cache_path(provider);
         if path.exists() {
@@ -530,6 +572,9 @@ impl OfflineCache {
     }
 
     /// Clear all cache entries.
+    ///
+    /// # Errors
+    /// Returns an error if any cache file cannot be removed.
     pub fn clear_all(&self) -> Result<()> {
         for provider in self.list_cached() {
             self.clear(&provider)?;

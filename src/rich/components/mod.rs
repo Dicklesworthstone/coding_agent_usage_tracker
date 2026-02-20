@@ -1,6 +1,6 @@
 //! Reusable rich output components for caut.
 //!
-//! This module provides a library of styled components that wrap rich_rust
+//! This module provides a library of styled components that wrap `rich_rust`
 //! primitives with caut-specific functionality. All components implement
 //! the `Renderable` trait for both rich and plain text output.
 //!

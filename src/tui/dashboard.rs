@@ -28,7 +28,7 @@ pub struct Dashboard<'a> {
 impl<'a> Dashboard<'a> {
     /// Create a new dashboard.
     #[must_use]
-    pub fn new(
+    pub const fn new(
         payloads: &'a [ProviderPayload],
         errors: &'a [String],
         selected: usize,
@@ -63,9 +63,10 @@ impl<'a> Dashboard<'a> {
         };
 
         // Calculate rows needed
-        let rows = (num_providers + cols - 1) / cols;
+        let rows = num_providers.div_ceil(cols);
 
         // Create row constraints
+        #[allow(clippy::cast_possible_truncation)] // row count is small
         let row_constraints: Vec<Constraint> = (0..rows)
             .map(|_| Constraint::Ratio(1, rows as u32))
             .collect();
@@ -86,6 +87,7 @@ impl<'a> Dashboard<'a> {
                 break;
             }
 
+            #[allow(clippy::cast_possible_truncation)] // column count is small
             let col_constraints: Vec<Constraint> = (0..items_in_row)
                 .map(|_| Constraint::Ratio(1, items_in_row as u32))
                 .collect();
@@ -102,6 +104,7 @@ impl<'a> Dashboard<'a> {
     }
 
     /// Render the header.
+    #[allow(clippy::unused_self)] // method for consistent API with other render methods
     fn render_header(&self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
         let title = Line::from(vec![
             Span::styled(
@@ -122,13 +125,14 @@ impl<'a> Dashboard<'a> {
 
     /// Render the footer.
     fn render_footer(&self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        let update_text = if let Some(ts) = self.last_update {
-            let now = chrono::Utc::now();
-            let secs_ago = (now - ts).num_seconds();
-            format!("Last updated: {secs_ago}s ago")
-        } else {
-            "Fetching...".to_string()
-        };
+        let update_text = self.last_update.map_or_else(
+            || "Fetching...".to_string(),
+            |ts| {
+                let now = chrono::Utc::now();
+                let secs_ago = (now - ts).num_seconds();
+                format!("Last updated: {secs_ago}s ago")
+            },
+        );
 
         let footer = Line::from(vec![
             Span::raw(" "),
@@ -171,6 +175,7 @@ impl<'a> Dashboard<'a> {
     }
 
     /// Render the help overlay.
+    #[allow(clippy::unused_self)] // method for consistent API with other render methods
     fn render_help(&self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
         let help_text = vec![
             Line::from(""),
@@ -218,6 +223,7 @@ impl Widget for Dashboard<'_> {
     fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
         // Main layout: header, content, errors (if any), footer
         let has_errors = !self.errors.is_empty();
+        #[allow(clippy::cast_possible_truncation)] // error count capped at 5
         let error_height = if has_errors {
             (self.errors.len() + 2).min(5) as u16
         } else {

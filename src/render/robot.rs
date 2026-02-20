@@ -4,18 +4,28 @@
 
 use crate::core::models::{CostPayload, ProviderPayload, RobotOutput};
 use crate::error::Result;
+use std::fmt::Write;
 
-/// Render any RobotOutput as JSON.
+/// Render any `RobotOutput` as JSON.
+///
+/// # Errors
+/// Returns an error if JSON serialization fails.
 pub fn render_json<T: serde::Serialize>(output: &T) -> Result<String> {
     Ok(serde_json::to_string(output)?)
 }
 
-/// Render any RobotOutput as pretty JSON.
+/// Render any `RobotOutput` as pretty JSON.
+///
+/// # Errors
+/// Returns an error if JSON serialization fails.
 pub fn render_json_pretty<T: serde::Serialize>(output: &T) -> Result<String> {
     Ok(serde_json::to_string_pretty(output)?)
 }
 
 /// Render usage as JSON (legacy).
+///
+/// # Errors
+/// Returns an error if JSON serialization fails.
 pub fn render_usage_json(results: &[ProviderPayload], pretty: bool) -> Result<String> {
     let output = RobotOutput::usage(results.to_vec(), vec![]);
 
@@ -27,43 +37,51 @@ pub fn render_usage_json(results: &[ProviderPayload], pretty: bool) -> Result<St
 }
 
 /// Render usage as Markdown.
+///
+/// # Errors
+/// Returns an error if formatting fails (infallible in practice).
 pub fn render_markdown_usage(results: &[ProviderPayload]) -> Result<String> {
     render_usage_md(results)
 }
 
 /// Render usage as Markdown (legacy).
+///
+/// # Errors
+/// Returns an error if formatting fails (infallible in practice).
 pub fn render_usage_md(results: &[ProviderPayload]) -> Result<String> {
     let mut output = String::new();
 
     for payload in results {
-        output.push_str(&format!("## {} ({})\n", payload.provider, payload.source));
+        let _ = writeln!(output, "## {} ({})", payload.provider, payload.source);
 
         if let Some(primary) = &payload.usage.primary {
-            output.push_str(&format!(
-                "- session_left: {:.0}%\n",
+            let _ = writeln!(
+                output,
+                "- session_left: {:.0}%",
                 primary.remaining_percent()
-            ));
+            );
             if let Some(resets_at) = &primary.resets_at {
-                output.push_str(&format!("- resets_session: {}\n", resets_at));
+                let _ = writeln!(output, "- resets_session: {resets_at}");
             }
         }
 
         if let Some(secondary) = &payload.usage.secondary {
-            output.push_str(&format!(
-                "- weekly_left: {:.0}%\n",
+            let _ = writeln!(
+                output,
+                "- weekly_left: {:.0}%",
                 secondary.remaining_percent()
-            ));
+            );
             if let Some(resets_at) = &secondary.resets_at {
-                output.push_str(&format!("- resets_weekly: {}\n", resets_at));
+                let _ = writeln!(output, "- resets_weekly: {resets_at}");
             }
         }
 
         if let Some(credits) = &payload.credits {
-            output.push_str(&format!("- credits_left: {:.1}\n", credits.remaining));
+            let _ = writeln!(output, "- credits_left: {:.1}", credits.remaining);
         }
 
         if let Some(status) = &payload.status {
-            output.push_str(&format!("- status: {:?}\n", status.indicator));
+            let _ = writeln!(output, "- status: {:?}", status.indicator);
         }
 
         output.push('\n');
@@ -73,6 +91,9 @@ pub fn render_usage_md(results: &[ProviderPayload]) -> Result<String> {
 }
 
 /// Render cost as JSON.
+///
+/// # Errors
+/// Returns an error if JSON serialization fails.
 pub fn render_cost_json(results: &[CostPayload], pretty: bool) -> Result<String> {
     let output = RobotOutput::new("cost", results);
 
@@ -86,19 +107,26 @@ pub fn render_cost_json(results: &[CostPayload], pretty: bool) -> Result<String>
 }
 
 /// Render cost as Markdown (public interface).
+///
+/// # Errors
+/// Returns an error if formatting fails (infallible in practice).
 pub fn render_markdown_cost(results: &[CostPayload]) -> Result<String> {
     render_cost_md(results)
 }
 
 /// Render cost as Markdown.
+///
+/// # Errors
+/// Returns an error if formatting fails (infallible in practice).
 pub fn render_cost_md(results: &[CostPayload]) -> Result<String> {
     let mut output = String::new();
 
     for payload in results {
-        output.push_str(&format!(
-            "## {} Cost ({})\n\n",
+        let _ = writeln!(
+            output,
+            "## {} Cost ({})\n",
             payload.provider, payload.source
-        ));
+        );
 
         // Summary section
         output.push_str("### Summary\n");
@@ -106,14 +134,14 @@ pub fn render_cost_md(results: &[CostPayload]) -> Result<String> {
         // Today's usage
         match (payload.session_cost_usd, payload.session_tokens) {
             (Some(cost), Some(tokens)) => {
-                output.push_str(&format!("- today_cost_usd: {:.2}\n", cost));
-                output.push_str(&format!("- today_messages: {}\n", tokens));
+                let _ = writeln!(output, "- today_cost_usd: {cost:.2}");
+                let _ = writeln!(output, "- today_messages: {tokens}");
             }
             (Some(cost), None) => {
-                output.push_str(&format!("- today_cost_usd: {:.2}\n", cost));
+                let _ = writeln!(output, "- today_cost_usd: {cost:.2}");
             }
             (None, Some(tokens)) => {
-                output.push_str(&format!("- today_messages: {}\n", tokens));
+                let _ = writeln!(output, "- today_messages: {tokens}");
             }
             (None, None) => {
                 output.push_str("- today: no_activity\n");
@@ -123,14 +151,14 @@ pub fn render_cost_md(results: &[CostPayload]) -> Result<String> {
         // Last 30 days
         match (payload.last_30_days_cost_usd, payload.last_30_days_tokens) {
             (Some(cost), Some(tokens)) => {
-                output.push_str(&format!("- last_30d_cost_usd: {:.2}\n", cost));
-                output.push_str(&format!("- last_30d_messages: {}\n", tokens));
+                let _ = writeln!(output, "- last_30d_cost_usd: {cost:.2}");
+                let _ = writeln!(output, "- last_30d_messages: {tokens}");
             }
             (Some(cost), None) => {
-                output.push_str(&format!("- last_30d_cost_usd: {:.2}\n", cost));
+                let _ = writeln!(output, "- last_30d_cost_usd: {cost:.2}");
             }
             (None, Some(tokens)) => {
-                output.push_str(&format!("- last_30d_messages: {}\n", tokens));
+                let _ = writeln!(output, "- last_30d_messages: {tokens}");
             }
             (None, None) => {
                 output.push_str("- last_30d: no_activity\n");
@@ -146,22 +174,22 @@ pub fn render_cost_md(results: &[CostPayload]) -> Result<String> {
             if has_token_breakdown {
                 output.push_str("\n### Token Breakdown\n");
                 if let Some(input) = totals.input_tokens {
-                    output.push_str(&format!("- input_tokens: {}\n", input));
+                    let _ = writeln!(output, "- input_tokens: {input}");
                 }
                 if let Some(out) = totals.output_tokens {
-                    output.push_str(&format!("- output_tokens: {}\n", out));
+                    let _ = writeln!(output, "- output_tokens: {out}");
                 }
                 if let Some(cache_read) = totals.cache_read_tokens {
-                    output.push_str(&format!("- cache_read_tokens: {}\n", cache_read));
+                    let _ = writeln!(output, "- cache_read_tokens: {cache_read}");
                 }
                 if let Some(cache_create) = totals.cache_creation_tokens {
-                    output.push_str(&format!("- cache_creation_tokens: {}\n", cache_create));
+                    let _ = writeln!(output, "- cache_creation_tokens: {cache_create}");
                 }
                 if let Some(total) = totals.total_tokens {
-                    output.push_str(&format!("- total_tokens: {}\n", total));
+                    let _ = writeln!(output, "- total_tokens: {total}");
                 }
                 if let Some(cost) = totals.total_cost {
-                    output.push_str(&format!("- total_cost_usd: {:.2}\n", cost));
+                    let _ = writeln!(output, "- total_cost_usd: {cost:.2}");
                 }
             }
         }
@@ -175,11 +203,11 @@ pub fn render_cost_md(results: &[CostPayload]) -> Result<String> {
             for entry in payload.daily.iter().take(7) {
                 let messages = entry
                     .total_tokens
-                    .map_or("-".to_string(), |t| t.to_string());
+                    .map_or_else(|| "-".to_string(), |t| t.to_string());
                 let cost = entry
                     .total_cost
-                    .map_or("-".to_string(), |c| format!("${:.2}", c));
-                output.push_str(&format!("| {} | {} | {} |\n", entry.date, messages, cost));
+                    .map_or_else(|| "-".to_string(), |c| format!("${c:.2}"));
+                let _ = writeln!(output, "| {} | {} | {} |", entry.date, messages, cost);
             }
         }
 
@@ -222,7 +250,7 @@ mod tests {
 
         // Check generatedAt exists and is valid ISO 8601 timestamp (camelCase due to serde rename)
         let generated_at = parsed["generatedAt"].as_str().unwrap();
-        assert!(generated_at.contains("T")); // ISO 8601 format
+        assert!(generated_at.contains('T')); // ISO 8601 format
         assert!(generated_at.ends_with('Z') || generated_at.contains('+')); // UTC or timezone
     }
 
@@ -409,8 +437,11 @@ mod tests {
         assert_json_valid!(&json);
         // Compact JSON should not have newlines (except in string values)
         // Split on newlines and check we got one line
-        let lines: Vec<&str> = json.lines().collect();
-        assert_eq!(lines.len(), 1, "Compact JSON should be a single line");
+        assert_eq!(
+            json.lines().count(),
+            1,
+            "Compact JSON should be a single line"
+        );
     }
 
     #[test]
@@ -429,8 +460,7 @@ mod tests {
         let json = render_cost_json(&[payload], false).unwrap();
         assert_json_valid!(&json);
 
-        let lines: Vec<&str> = json.lines().collect();
-        assert_eq!(lines.len(), 1);
+        assert_eq!(json.lines().count(), 1);
     }
 
     // =========================================================================

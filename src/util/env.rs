@@ -27,7 +27,7 @@ pub fn should_use_color(no_color_flag: bool) -> bool {
     }
 
     // Check TERM=dumb
-    if std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false) {
+    if std::env::var("TERM").is_ok_and(|t| t == "dumb") {
         return false;
     }
 

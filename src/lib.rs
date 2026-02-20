@@ -1,7 +1,7 @@
 //! caut - Coding Agent Usage Tracker
 //!
 //! A CLI tool for monitoring LLM provider usage (Codex, Claude, Gemini, etc.).
-//! This is a Rust port of CodexBar's CLI functionality.
+//! This is a Rust port of `CodexBar`'s CLI functionality.
 
 // Note: deny (not forbid) to allow #[allow(unsafe_code)] in test helpers for env var manipulation
 #![deny(unsafe_code)]

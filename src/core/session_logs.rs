@@ -45,6 +45,9 @@ pub struct SessionLogFinder {
 
 impl SessionLogFinder {
     /// Create a new finder using default home-based paths.
+    ///
+    /// # Errors
+    /// Returns an error if the home directory cannot be determined.
     pub fn new() -> Result<Self> {
         let home = dirs::home_dir()
             .ok_or_else(|| CautError::Config("Cannot determine home directory".to_string()))?;
@@ -56,7 +59,7 @@ impl SessionLogFinder {
 
     /// Create a finder with explicit base paths (useful for tests).
     #[must_use]
-    pub fn with_paths(claude_base: PathBuf, codex_base: PathBuf) -> Self {
+    pub const fn with_paths(claude_base: PathBuf, codex_base: PathBuf) -> Self {
         Self {
             claude_base,
             codex_base,
@@ -173,6 +176,9 @@ pub struct ClaudeSessionParser;
 
 impl ClaudeSessionParser {
     /// Parse a Claude session log JSONL file.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be opened or read.
     pub fn parse(&self, path: &Path) -> Result<SessionUsage> {
         let mut usage = parse_session_log(path)?;
         if usage.project_path.is_none() {
@@ -187,6 +193,9 @@ pub struct CodexSessionParser;
 
 impl CodexSessionParser {
     /// Parse a Codex session log JSONL file.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be opened or read.
     pub fn parse(&self, path: &Path) -> Result<SessionUsage> {
         parse_session_log(path)
     }
@@ -194,7 +203,7 @@ impl CodexSessionParser {
 
 fn parse_session_log(path: &Path) -> Result<SessionUsage> {
     let file = File::open(path)
-        .map_err(|e| CautError::Config(format!("Failed to open session log: {}", e)))?;
+        .map_err(|e| CautError::Config(format!("Failed to open session log: {e}")))?;
     let reader = BufReader::new(file);
 
     let mut usage = SessionUsage {
@@ -211,10 +220,7 @@ fn parse_session_log(path: &Path) -> Result<SessionUsage> {
     };
 
     for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
+        let Ok(line) = line else { continue };
         if line.trim().is_empty() {
             continue;
         }
@@ -230,10 +236,10 @@ fn parse_session_log(path: &Path) -> Result<SessionUsage> {
             usage.record_timestamp(ts);
         }
 
-        if let Some(model) = extract_model(&value) {
-            if !model.is_empty() {
-                usage.models_used.insert(model.to_string());
-            }
+        if let Some(model) = extract_model(&value)
+            && !model.is_empty()
+        {
+            usage.models_used.insert(model.to_string());
         }
 
         for usage_value in extract_usage_candidates(&value) {
@@ -280,7 +286,7 @@ fn extract_token_counts(value: &Value) -> Option<TokenCounts> {
     })
 }
 
-fn extract_usage_candidates<'a>(value: &'a Value) -> Vec<&'a Value> {
+fn extract_usage_candidates(value: &Value) -> Vec<&Value> {
     let mut candidates = Vec::new();
 
     let usage_keys = ["usage", "token_usage", "usage_stats", "tokens"];
@@ -350,9 +356,11 @@ fn parse_timestamp(value: &Value) -> Option<DateTime<Utc>> {
             .ok()
             .map(|dt| dt.with_timezone(&Utc)),
         Value::Number(num) => {
+            #[allow(clippy::cast_possible_wrap)] // u64 timestamps won't exceed i64::MAX
             let raw = num.as_i64().or_else(|| num.as_u64().map(|u| u as i64))?;
             let (secs, nanos) = if raw > 1_000_000_000_000 {
                 let secs = raw / 1000;
+                #[allow(clippy::cast_sign_loss)] // raw % 1000 is always non-negative here
                 let millis = (raw % 1000) as u32;
                 (secs, millis * 1_000_000)
             } else {
@@ -364,19 +372,20 @@ fn parse_timestamp(value: &Value) -> Option<DateTime<Utc>> {
     }
 }
 
+#[allow(clippy::cast_possible_wrap)] // u64 token counts won't exceed i64::MAX
 fn first_i64(value: &Value, keys: &[&str]) -> Option<i64> {
     for key in keys {
-        if let Some(v) = value.get(*key) {
-            if let Some(num) = v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)) {
-                return Some(num);
-            }
+        if let Some(v) = value.get(*key)
+            && let Some(num) = v.as_i64().or_else(|| v.as_u64().map(|u| u as i64))
+        {
+            return Some(num);
         }
     }
     None
 }
 
 fn is_jsonl_file(path: &Path) -> bool {
-    path.extension().map_or(false, |ext| ext == "jsonl")
+    path.extension().is_some_and(|ext| ext == "jsonl")
 }
 
 fn collect_jsonl_files(root: &Path) -> Vec<PathBuf> {
@@ -384,9 +393,8 @@ fn collect_jsonl_files(root: &Path) -> Vec<PathBuf> {
     let mut stack = vec![root.to_path_buf()];
 
     while let Some(dir) = stack.pop() {
-        let entries = match fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(_) => continue,
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
         };
 
         for entry in entries.flatten() {
@@ -405,8 +413,7 @@ fn collect_jsonl_files(root: &Path) -> Vec<PathBuf> {
 fn session_id_from_path(path: &Path) -> String {
     path.file_stem()
         .and_then(|s| s.to_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| "unknown".to_string())
+        .map_or_else(|| "unknown".to_string(), str::to_string)
 }
 
 fn extract_claude_project_path(path: &Path) -> Option<PathBuf> {
@@ -414,17 +421,17 @@ fn extract_claude_project_path(path: &Path) -> Option<PathBuf> {
     if conversations_dir.file_name()?.to_str()? != "conversations" {
         return None;
     }
-    conversations_dir.parent().map(|p| p.to_path_buf())
+    conversations_dir.parent().map(std::path::Path::to_path_buf)
 }
 
 fn file_modified_at(path: &Path) -> Option<DateTime<Utc>> {
     let metadata = fs::metadata(path).ok()?;
     let modified = metadata.modified().ok()?;
-    system_time_to_utc(modified)
+    Some(system_time_to_utc(modified))
 }
 
-fn system_time_to_utc(time: SystemTime) -> Option<DateTime<Utc>> {
-    Some(DateTime::<Utc>::from(time))
+fn system_time_to_utc(time: SystemTime) -> DateTime<Utc> {
+    DateTime::<Utc>::from(time)
 }
 
 fn within_range(
@@ -433,15 +440,15 @@ fn within_range(
     until: Option<DateTime<Utc>>,
 ) -> bool {
     if let Some(modified) = modified_at {
-        if let Some(since) = since {
-            if modified < since {
-                return false;
-            }
+        if let Some(since) = since
+            && modified < since
+        {
+            return false;
         }
-        if let Some(until) = until {
-            if modified > until {
-                return false;
-            }
+        if let Some(until) = until
+            && modified > until
+        {
+            return false;
         }
     }
     true

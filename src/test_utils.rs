@@ -58,7 +58,7 @@ pub fn make_test_rate_window(used_percent: f64) -> RateWindow {
 ///
 /// Useful for testing rendering code that must handle missing optional fields.
 #[must_use]
-pub fn make_test_rate_window_minimal(used_percent: f64) -> RateWindow {
+pub const fn make_test_rate_window_minimal(used_percent: f64) -> RateWindow {
     RateWindow::new(used_percent)
 }
 

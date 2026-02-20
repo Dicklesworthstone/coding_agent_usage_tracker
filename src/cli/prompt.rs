@@ -35,7 +35,7 @@ pub struct PromptCache {
 /// Usage data for a single provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderPromptData {
-    /// Provider name (cli_name).
+    /// Provider name (`cli_name`).
     pub provider: String,
     /// Primary usage percentage (session window).
     pub primary_pct: Option<f64>,
@@ -48,6 +48,9 @@ pub struct ProviderPromptData {
 }
 
 /// Execute the prompt command.
+///
+/// # Errors
+/// Returns an error if the prompt cache cannot be read or deserialized.
 pub fn execute(args: &PromptArgs) -> Result<()> {
     // Handle --install flag for shell snippets
     if let Some(shell) = args.install {
@@ -152,7 +155,7 @@ fn format_minimal(providers: &[&ProviderPromptData], use_color: bool) -> String 
     };
 
     let pct = primary.primary_pct.unwrap_or(0.0);
-    let pct_str = format!("{:.0}%", pct);
+    let pct_str = format!("{pct:.0}%");
 
     if use_color {
         colorize_by_percent(&pct_str, pct)
@@ -198,7 +201,7 @@ fn format_icon(providers: &[&ProviderPromptData], use_color: bool) -> String {
         "✓"
     };
 
-    let pct_str = format!("{}{:.0}%", icon, pct);
+    let pct_str = format!("{icon}{pct:.0}%");
 
     if use_color {
         colorize_by_percent(&pct_str, pct)
@@ -213,7 +216,7 @@ fn format_provider_compact(provider: &ProviderPromptData, use_color: bool) -> St
 
     // Add usage percentage
     if let Some(pct) = provider.primary_pct {
-        let pct_str = format!("{:.0}%", pct);
+        let pct_str = format!("{pct:.0}%");
         parts.push(if use_color {
             colorize_by_percent(&pct_str, pct)
         } else {
@@ -224,25 +227,25 @@ fn format_provider_compact(provider: &ProviderPromptData, use_color: bool) -> St
     // Add cost if available
     if let Some(cost) = provider.cost_today_usd {
         let cost_str = if cost >= 100.0 {
-            format!("${:.0}", cost)
+            format!("${cost:.0}")
         } else if cost >= 10.0 {
-            format!("${:.1}", cost)
+            format!("${cost:.1}")
         } else {
-            format!("${:.2}", cost)
+            format!("${cost:.2}")
         };
         parts.push(cost_str);
     }
 
     // Add credits if available and no cost
-    if provider.cost_today_usd.is_none() {
-        if let Some(credits) = provider.credits_remaining {
-            let credits_str = if credits >= 100.0 {
-                format!("${:.0}", credits)
-            } else {
-                format!("${:.1}", credits)
-            };
-            parts.push(credits_str);
-        }
+    if provider.cost_today_usd.is_none()
+        && let Some(credits) = provider.credits_remaining
+    {
+        let credits_str = if credits >= 100.0 {
+            format!("${credits:.0}")
+        } else {
+            format!("${credits:.1}")
+        };
+        parts.push(credits_str);
     }
 
     if parts.is_empty() {
@@ -260,11 +263,10 @@ fn format_provider_full(provider: &ProviderPromptData, use_color: bool) -> Strin
 
     // Add primary/secondary usage percentages
     if let Some(pct) = provider.primary_pct {
-        let pct_str = if let Some(secondary) = provider.secondary_pct {
-            format!("{:.0}%/{:.0}%", pct, secondary)
-        } else {
-            format!("{:.0}%", pct)
-        };
+        let pct_str = provider.secondary_pct.map_or_else(
+            || format!("{pct:.0}%"),
+            |secondary| format!("{pct:.0}%/{secondary:.0}%"),
+        );
         parts.push(if use_color {
             colorize_by_percent(&pct_str, pct)
         } else {
@@ -274,12 +276,12 @@ fn format_provider_full(provider: &ProviderPromptData, use_color: bool) -> Strin
 
     // Add cost
     if let Some(cost) = provider.cost_today_usd {
-        parts.push(format!("${:.2}", cost));
+        parts.push(format!("${cost:.2}"));
     }
 
     // Add credits
     if let Some(credits) = provider.credits_remaining {
-        parts.push(format!("cr:${:.2}", credits));
+        parts.push(format!("cr:${credits:.2}"));
     }
 
     if parts.is_empty() {
@@ -311,7 +313,7 @@ fn colorize_by_percent(text: &str, percent: f64) -> String {
     } else {
         "\x1b[32m" // Green
     };
-    format!("{}{}\x1b[0m", color_code, text)
+    format!("{color_code}{text}\x1b[0m")
 }
 
 /// Print shell installation snippet.
@@ -430,6 +432,9 @@ end
 
 /// Update the prompt cache from fetch results.
 /// Called by the usage command after successful fetches.
+///
+/// # Errors
+/// Returns an error if the cache file cannot be written to disk.
 pub fn update_cache(providers: &[ProviderPromptData]) -> Result<()> {
     let paths = AppPaths::new();
     let cache_path = paths.prompt_cache_file();
@@ -458,6 +463,7 @@ pub fn update_cache_async(providers: Vec<ProviderPromptData>) {
 }
 
 /// Check if the prompt cache exists and is fresh.
+#[must_use]
 pub fn cache_is_fresh(max_age_secs: u64) -> bool {
     let paths = AppPaths::new();
     let cache_path = paths.prompt_cache_file();
@@ -517,7 +523,7 @@ mod tests {
 
         let high_usage = ProviderPromptData {
             primary_pct: Some(95.0),
-            ..low_usage.clone()
+            ..low_usage
         };
         let output = format_icon(&[&high_usage], false);
         assert!(output.contains("⚠️"));
@@ -570,8 +576,7 @@ mod tests {
             format_prompt_with_staleness(&[&data], PromptFormat::Minimal, false, Staleness::Stale);
         assert!(
             output.starts_with('~'),
-            "Expected ~ prefix for stale data: {}",
-            output
+            "Expected ~ prefix for stale data: {output}"
         );
         assert!(output.contains("46%"));
     }
@@ -587,8 +592,7 @@ mod tests {
         );
         assert!(
             output.starts_with('?'),
-            "Expected ? prefix for very stale data: {}",
-            output
+            "Expected ? prefix for very stale data: {output}"
         );
         assert!(output.contains("46%"));
     }

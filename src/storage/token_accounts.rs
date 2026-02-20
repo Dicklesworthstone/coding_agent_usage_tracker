@@ -1,7 +1,7 @@
 //! Token account storage.
 //!
 //! Supports both caut native format and CodexBar-compatible format.
-//! See EXISTING_CODEXBAR_STRUCTURE.md section 8.
+//! See `EXISTING_CODEXBAR_STRUCTURE.md` section 8.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -73,6 +73,9 @@ pub struct TokenAccountStore {
 
 impl TokenAccountStore {
     /// Load from file or create empty.
+    ///
+    /// # Errors
+    /// Returns an error if the file exists but cannot be read or contains invalid JSON.
     pub fn load(path: &Path) -> Result<Self> {
         if path.exists() {
             let content = std::fs::read_to_string(path)?;
@@ -136,6 +139,10 @@ impl TokenAccountStore {
     }
 
     /// Save to file.
+    ///
+    /// # Errors
+    /// Returns an error if the parent directory cannot be created, serialization fails,
+    /// or the file cannot be written.
     pub fn save(&self) -> Result<()> {
         if let Some(path) = &self.path {
             if let Some(parent) = path.parent() {
@@ -148,18 +155,24 @@ impl TokenAccountStore {
     }
 }
 
-/// Convert between CodexBar and caut formats.
+/// Convert between `CodexBar` and caut formats.
 pub mod convert {
-    use super::*;
+    use super::{Result, TokenAccountsFile};
 
-    /// Convert CodexBar format to caut format.
+    /// Convert `CodexBar` format to caut format.
+    ///
+    /// # Errors
+    /// Returns an error if the content is not valid JSON or does not match the expected schema.
     pub fn from_codexbar(content: &str) -> Result<TokenAccountsFile> {
         // CodexBar uses the same JSON structure, just different file location
         let data: TokenAccountsFile = serde_json::from_str(content)?;
         Ok(data)
     }
 
-    /// Convert caut format to CodexBar format.
+    /// Convert caut format to `CodexBar` format.
+    ///
+    /// # Errors
+    /// Returns an error if serialization to JSON fails.
     pub fn to_codexbar(data: &TokenAccountsFile) -> Result<String> {
         // Same structure, just serialize
         Ok(serde_json::to_string_pretty(data)?)

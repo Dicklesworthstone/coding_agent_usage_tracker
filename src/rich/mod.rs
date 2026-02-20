@@ -1,4 +1,4 @@
-//! Rich output module - wraps rich_rust for caut-specific use.
+//! Rich output module - wraps `rich_rust` for caut-specific use.
 //!
 //! This module provides the safety gate infrastructure that determines when rich
 //! terminal output should be used vs plain text. The PRIMARY users of caut are
@@ -37,7 +37,7 @@ const THEME_ENV: &str = "CAUT_THEME";
 /// Terminal color capability level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorDepth {
-    /// Plain text only (NO_COLOR set or TERM=dumb).
+    /// Plain text only (`NO_COLOR` set or TERM=dumb).
     NoColor,
     /// Basic 8/16 colors.
     #[default]
@@ -58,11 +58,11 @@ pub fn detect_color_depth() -> ColorDepth {
     }
 
     // Check COLORTERM for truecolor
-    if let Ok(colorterm) = std::env::var("COLORTERM") {
-        if colorterm == "truecolor" || colorterm == "24bit" {
-            tracing::debug!(reason = "COLORTERM", colorterm = %colorterm, "Color depth: TrueColor");
-            return ColorDepth::TrueColor;
-        }
+    if let Ok(colorterm) = std::env::var("COLORTERM")
+        && (colorterm == "truecolor" || colorterm == "24bit")
+    {
+        tracing::debug!(reason = "COLORTERM", colorterm = %colorterm, "Color depth: TrueColor");
+        return ColorDepth::TrueColor;
     }
 
     // Check TERM for 256 colors
@@ -284,6 +284,10 @@ impl ThemeConfig {
 // =============================================================================
 
 /// Parse color from name with fallback.
+///
+/// # Panics
+///
+/// Panics if the fallback color "white" fails to parse (should never happen).
 #[must_use]
 pub fn parse_color(name: &str) -> Color {
     Color::parse(name).unwrap_or_else(|_| Color::parse("white").unwrap())
@@ -570,11 +574,11 @@ pub fn get_theme_config(theme_arg: Option<&str>) -> ThemeConfig {
     }
 
     // Priority 2: Environment variable
-    if let Ok(name) = std::env::var(THEME_ENV) {
-        if !name.trim().is_empty() {
-            tracing::debug!(source = "env_var", theme = %name, "Theme selected via CAUT_THEME");
-            return theme_by_name(&name);
-        }
+    if let Ok(name) = std::env::var(THEME_ENV)
+        && !name.trim().is_empty()
+    {
+        tracing::debug!(source = "env_var", theme = %name, "Theme selected via CAUT_THEME");
+        return theme_by_name(&name);
     }
 
     // Priority 3: Auto-detect based on capabilities
@@ -659,7 +663,7 @@ pub fn should_use_rich_output(format: OutputFormat, no_color_flag: bool) -> bool
     }
 
     // Check for dumb terminal
-    if std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false) {
+    if std::env::var("TERM").is_ok_and(|t| t == "dumb") {
         tracing::debug!(
             reason = "term_dumb",
             decision = "disabled",
@@ -724,7 +728,7 @@ pub fn contains_ansi(text: &str) -> bool {
     text.contains("\x1b[")
 }
 
-/// Wrapper around rich_rust Console that respects safety gates.
+/// Wrapper around `rich_rust` Console that respects safety gates.
 ///
 /// This struct provides a consistent interface for output that automatically
 /// handles the rich/plain decision. When rich output is disabled, markup is
@@ -764,7 +768,7 @@ impl RichConsole {
     /// Print to stderr (for errors).
     ///
     /// Even when rich is enabled for stdout, stderr respects its own TTY status.
-    /// Note: rich_rust Console doesn't have stderr support, so we print directly.
+    /// Note: `rich_rust` Console doesn't have stderr support, so we print directly.
     pub fn eprint(&self, text: &str) {
         if self.enabled && env_util::stderr_is_tty() {
             // rich_rust doesn't support stderr, print with markup interpretation
@@ -789,13 +793,13 @@ impl RichConsole {
 
     /// Check if rich output is enabled.
     #[must_use]
-    pub fn is_rich_enabled(&self) -> bool {
+    pub const fn is_rich_enabled(&self) -> bool {
         self.enabled
     }
 
     /// Get the current theme.
     #[must_use]
-    pub fn theme(&self) -> &Theme {
+    pub const fn theme(&self) -> &Theme {
         &self.theme
     }
 
@@ -1171,7 +1175,7 @@ mod tests {
         let console = RichConsole::new(OutputFormat::Json, false);
         let width = console.width();
         // Should be default 80 when rich is disabled
-        assert_eq!(width, 80, "Expected default width 80, got {}", width);
+        assert_eq!(width, 80, "Expected default width 80, got {width}");
     }
 
     #[test]
@@ -1356,8 +1360,8 @@ mod tests {
         assert_eq!(hc.name, "high-contrast");
         let high_contrast = theme_by_name("high-contrast");
         assert_eq!(high_contrast.name, "high-contrast");
-        let highcontrast = theme_by_name("highcontrast");
-        assert_eq!(highcontrast.name, "high-contrast");
+        let hc_no_dash = theme_by_name("highcontrast");
+        assert_eq!(hc_no_dash.name, "high-contrast");
         let ascii = theme_by_name("ascii");
         assert!(matches!(ascii.box_style, BoxStyle::Ascii));
         let plain = theme_by_name("plain");
@@ -1410,10 +1414,7 @@ mod tests {
     fn test_provider_style_claude() {
         let theme = create_default_theme();
         let style = theme.provider_style("Claude");
-        assert_eq!(
-            format!("{:?}", style),
-            format!("{:?}", theme.provider_claude)
-        );
+        assert_eq!(format!("{style:?}"), format!("{:?}", theme.provider_claude));
     }
 
     #[test]
@@ -1422,18 +1423,15 @@ mod tests {
         let style1 = provider_style("CLAUDE", &theme);
         let style2 = provider_style("claude", &theme);
         let style3 = provider_style("Claude", &theme);
-        assert_eq!(format!("{:?}", style1), format!("{:?}", style2));
-        assert_eq!(format!("{:?}", style2), format!("{:?}", style3));
+        assert_eq!(format!("{style1:?}"), format!("{:?}", style2));
+        assert_eq!(format!("{style2:?}"), format!("{:?}", style3));
     }
 
     #[test]
     fn test_provider_style_unknown_uses_other() {
         let theme = create_default_theme();
         let style = theme.provider_style("unknown_provider_xyz");
-        assert_eq!(
-            format!("{:?}", style),
-            format!("{:?}", theme.provider_other)
-        );
+        assert_eq!(format!("{style:?}"), format!("{:?}", theme.provider_other));
     }
 
     #[test]
@@ -1444,7 +1442,7 @@ mod tests {
             let style = theme.provider_style(p);
             // Should not be the "other" fallback
             assert_ne!(
-                format!("{:?}", style),
+                format!("{style:?}"),
                 format!("{:?}", theme.provider_other),
                 "Provider {} should have dedicated color",
                 p

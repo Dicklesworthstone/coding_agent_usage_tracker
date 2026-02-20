@@ -55,7 +55,7 @@ pub struct StatusBadge {
 impl StatusBadge {
     /// Create a new status badge with the given level.
     #[must_use]
-    pub fn new(level: StatusLevel) -> Self {
+    pub const fn new(level: StatusLevel) -> Self {
         Self {
             level,
             label: None,
@@ -65,25 +65,25 @@ impl StatusBadge {
 
     /// Create a success badge.
     #[must_use]
-    pub fn success() -> Self {
+    pub const fn success() -> Self {
         Self::new(StatusLevel::Success)
     }
 
     /// Create a warning badge.
     #[must_use]
-    pub fn warning() -> Self {
+    pub const fn warning() -> Self {
         Self::new(StatusLevel::Warning)
     }
 
     /// Create an error badge.
     #[must_use]
-    pub fn error() -> Self {
+    pub const fn error() -> Self {
         Self::new(StatusLevel::Error)
     }
 
     /// Create an info badge.
     #[must_use]
-    pub fn info() -> Self {
+    pub const fn info() -> Self {
         Self::new(StatusLevel::Info)
     }
 
@@ -96,14 +96,14 @@ impl StatusBadge {
 
     /// Disable Unicode icons (use ASCII fallback).
     #[must_use]
-    pub fn ascii(mut self) -> Self {
+    pub const fn ascii(mut self) -> Self {
         self.use_unicode = false;
         self
     }
 
     /// Get the style for this badge's level.
     #[must_use]
-    pub fn style<'a>(&self, theme: &'a ThemeConfig) -> &'a Style {
+    pub const fn style<'a>(&self, theme: &'a ThemeConfig) -> &'a Style {
         match self.level {
             StatusLevel::Success => &theme.status_success,
             StatusLevel::Warning => &theme.status_warning,
@@ -142,20 +142,16 @@ impl Renderable for StatusBadge {
             self.level.plain_icon()
         };
 
-        if let Some(label) = &self.label {
-            format!("{} {}", icon, label)
-        } else {
-            icon.to_string()
-        }
+        self.label
+            .as_ref()
+            .map_or_else(|| icon.to_string(), |label| format!("{icon} {label}"))
     }
 
     fn render_plain(&self) -> String {
         let icon = self.level.plain_icon();
-        if let Some(label) = &self.label {
-            format!("{} {}", icon, label)
-        } else {
-            icon.to_string()
-        }
+        self.label
+            .as_ref()
+            .map_or_else(|| icon.to_string(), |label| format!("{icon} {label}"))
     }
 }
 
