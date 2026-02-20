@@ -15,6 +15,7 @@ use tempfile::TempDir;
 
 /// Get the caut binary command.
 /// Handles custom build directory by checking env var or falling back to specific path.
+#[allow(deprecated)]
 fn caut_cmd() -> Command {
     // Try standard cargo_bin first
     if let Ok(cmd) = Command::cargo_bin("caut") {
@@ -31,7 +32,7 @@ fn caut_cmd() -> Command {
 }
 
 /// Setup a test environment with a temporary directory and an initialized DB.
-/// Returns the TempDir which must be kept alive for the duration of the test.
+/// Returns the `TempDir` which must be kept alive for the duration of the test.
 fn setup_env() -> (Command, TempDir) {
     let temp_dir = TempDir::new().expect("failed to create temp dir");
 

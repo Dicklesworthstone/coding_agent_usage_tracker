@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(clippy::significant_drop_tightening)]
 
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::layer::SubscriberExt;
@@ -77,7 +78,7 @@ impl TestLogCapture {
             .iter()
             .filter(|l| l.level == tracing::Level::ERROR)
             .collect();
-        assert!(errors.is_empty(), "Unexpected errors: {:#?}", errors);
+        assert!(errors.is_empty(), "Unexpected errors: {errors:#?}");
     }
 
     /// Assert a structured field was logged.
@@ -138,9 +139,9 @@ impl tracing::field::Visit for FieldVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         let name = field.name();
         if name == "message" {
-            self.message = format!("{:?}", value);
+            self.message = format!("{value:?}");
         } else {
-            self.fields.push((name.to_string(), format!("{:?}", value)));
+            self.fields.push((name.to_string(), format!("{value:?}")));
         }
     }
 

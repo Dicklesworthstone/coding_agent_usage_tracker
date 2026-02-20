@@ -5,14 +5,13 @@
 
 mod common;
 
-use caut::core::models::{CostPayload, ProviderPayload, RobotOutput, UsageSnapshot};
+use caut::core::models::{CostPayload, ProviderPayload, RobotOutput};
 use caut::render::{human, robot};
 use caut::test_utils::{
     make_test_cost_payload, make_test_cost_payload_minimal, make_test_provider_payload,
-    make_test_provider_payload_minimal, make_test_usage_snapshot, make_test_usage_snapshot_minimal,
-    make_test_usage_snapshot_with_tertiary,
+    make_test_provider_payload_minimal, make_test_usage_snapshot_with_tertiary,
 };
-use caut::{assert_contains, assert_json_valid, assert_not_contains};
+use caut::{assert_contains, assert_json_valid};
 
 use common::logger::TestLogger;
 
@@ -32,8 +31,7 @@ fn usage_pipeline_single_provider_to_human_output() {
 
     log.phase("render_human");
     // Stage 2: Render to human output
-    let human_output =
-        human::render_usage(&[payload.clone()], false).expect("Human render should succeed");
+    let human_output = human::render_usage(&[payload], false).expect("Human render should succeed");
 
     log.phase("verify");
     // Stage 3: Verify output contains expected data
@@ -54,8 +52,8 @@ fn usage_pipeline_single_provider_to_robot_json() {
     let payload = make_test_provider_payload(provider, source);
 
     log.phase("render_robot");
-    let json_output = robot::render_usage_json(&[payload.clone()], false)
-        .expect("Robot JSON render should succeed");
+    let json_output =
+        robot::render_usage_json(&[payload], false).expect("Robot JSON render should succeed");
 
     log.phase("verify");
     assert_json_valid!(&json_output);
@@ -85,7 +83,7 @@ fn usage_pipeline_single_provider_to_robot_markdown() {
         robot::render_markdown_usage(&[payload]).expect("Markdown render should succeed");
 
     log.phase("verify");
-    assert_contains!(&md_output, &format!("## {} ({})", provider, source));
+    assert_contains!(&md_output, &format!("## {provider} ({source})"));
     assert_contains!(&md_output, "session_left:");
     assert_contains!(&md_output, "weekly_left:");
     assert_contains!(&md_output, "credits_left:");
@@ -162,12 +160,12 @@ fn usage_pipeline_handles_minimal_data() {
     let payload = make_test_provider_payload_minimal("test", "minimal");
 
     log.phase("render_human");
-    let human_output = human::render_usage(&[payload.clone()], false)
+    let human_output = human::render_usage(std::slice::from_ref(&payload), false)
         .expect("Minimal data human render should succeed");
     assert_contains!(&human_output, "test");
 
     log.phase("render_robot");
-    let json_output = robot::render_usage_json(&[payload], false)
+    let json_output = robot::render_usage_json(std::slice::from_ref(&payload), false)
         .expect("Minimal data JSON render should succeed");
     assert_json_valid!(&json_output);
     log.finish_ok();
@@ -190,7 +188,7 @@ fn cost_pipeline_single_provider_to_human_output() {
         human::render_cost(&[payload], false).expect("Cost human render should succeed");
 
     log.phase("verify");
-    assert_contains!(&human_output, &format!("{} Cost", provider));
+    assert_contains!(&human_output, &format!("{provider} Cost"));
     assert_contains!(&human_output, "Today:");
     assert_contains!(&human_output, "Last 30 days:");
     log.finish_ok();
@@ -234,7 +232,7 @@ fn cost_pipeline_single_provider_to_robot_markdown() {
         robot::render_markdown_cost(&[payload]).expect("Cost markdown render should succeed");
 
     log.phase("verify");
-    assert_contains!(&md_output, &format!("## {} Cost", provider));
+    assert_contains!(&md_output, &format!("## {provider} Cost"));
     assert_contains!(&md_output, "### Summary");
     assert_contains!(&md_output, "today_cost_usd:");
     log.finish_ok();
@@ -321,13 +319,13 @@ fn cost_pipeline_handles_minimal_data() {
     let payload = make_test_cost_payload_minimal("test");
 
     log.phase("render_human");
-    let human_output = human::render_cost(&[payload.clone()], false)
+    let human_output = human::render_cost(std::slice::from_ref(&payload), false)
         .expect("Minimal cost human render should succeed");
     assert_contains!(&human_output, "test Cost");
     assert_contains!(&human_output, "No activity");
 
     log.phase("render_robot");
-    let json_output = robot::render_cost_json(&[payload], false)
+    let json_output = robot::render_cost_json(std::slice::from_ref(&payload), false)
         .expect("Minimal cost JSON render should succeed");
     assert_json_valid!(&json_output);
     log.finish_ok();
@@ -402,8 +400,8 @@ fn usage_round_trip_serialization() {
     let original = make_test_provider_payload("codex", "cli");
 
     log.phase("serialize");
-    let json =
-        robot::render_usage_json(&[original.clone()], false).expect("Serialization should succeed");
+    let json = robot::render_usage_json(std::slice::from_ref(&original), false)
+        .expect("Serialization should succeed");
 
     log.phase("deserialize");
     let parsed: RobotOutput<Vec<ProviderPayload>> =
@@ -424,8 +422,8 @@ fn cost_round_trip_serialization() {
     let original = make_test_cost_payload("claude");
 
     log.phase("serialize");
-    let json =
-        robot::render_cost_json(&[original.clone()], false).expect("Serialization should succeed");
+    let json = robot::render_cost_json(std::slice::from_ref(&original), false)
+        .expect("Serialization should succeed");
 
     log.phase("deserialize");
     let parsed: RobotOutput<Vec<CostPayload>> =
@@ -450,12 +448,12 @@ fn same_data_renders_consistently() {
     let payload = make_test_provider_payload("codex", "cli");
 
     log.phase("render_all_formats");
-    let human_output =
-        human::render_usage(&[payload.clone()], true).expect("Human render should succeed");
-    let json_output =
-        robot::render_usage_json(&[payload.clone()], false).expect("JSON render should succeed");
-    let md_output =
-        robot::render_markdown_usage(&[payload]).expect("Markdown render should succeed");
+    let human_output = human::render_usage(std::slice::from_ref(&payload), true)
+        .expect("Human render should succeed");
+    let json_output = robot::render_usage_json(std::slice::from_ref(&payload), false)
+        .expect("JSON render should succeed");
+    let md_output = robot::render_markdown_usage(std::slice::from_ref(&payload))
+        .expect("Markdown render should succeed");
 
     log.phase("verify");
     // All formats should contain the provider name

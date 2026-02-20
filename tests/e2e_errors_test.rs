@@ -62,6 +62,7 @@ impl Drop for EnvGuard {
 }
 
 #[test]
+#[allow(deprecated)]
 fn invalid_command_is_rejected() {
     let log = TestLogger::new("invalid_command_is_rejected");
     log.phase("execute");
@@ -82,6 +83,7 @@ fn invalid_command_is_rejected() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn invalid_provider_is_rejected() {
     let log = TestLogger::new("invalid_provider_is_rejected");
     log.phase("execute");
@@ -102,6 +104,7 @@ fn invalid_provider_is_rejected() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn conflicting_flags_are_rejected() {
     let log = TestLogger::new("conflicting_flags_are_rejected");
     log.phase("execute");
@@ -119,6 +122,7 @@ fn conflicting_flags_are_rejected() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn help_exits_zero() {
     let log = TestLogger::new("help_exits_zero");
     log.phase("execute");
@@ -134,6 +138,7 @@ fn help_exits_zero() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn version_format_is_valid() {
     let log = TestLogger::new("version_format_is_valid");
     log.phase("execute");
@@ -149,6 +154,7 @@ fn version_format_is_valid() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn corrupted_config_does_not_panic() {
     let log = TestLogger::new("corrupted_config_does_not_panic");
     log.phase("setup");

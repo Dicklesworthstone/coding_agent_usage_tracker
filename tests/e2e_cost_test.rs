@@ -23,6 +23,7 @@ use common::logger::TestLogger;
 // =============================================================================
 
 /// Get the caut binary command.
+#[allow(deprecated)]
 fn caut_cmd() -> Command {
     // Try standard cargo_bin first
     if let Ok(cmd) = Command::cargo_bin("caut") {
@@ -201,8 +202,7 @@ fn cost_pretty_json_is_formatted() {
     let line_count = stdout_str.lines().count();
     assert!(
         line_count > 1,
-        "Pretty JSON should have multiple lines, got {}",
-        line_count
+        "Pretty JSON should have multiple lines, got {line_count}"
     );
 
     // Should still be valid JSON
@@ -383,16 +383,18 @@ fn cost_json_session_cost_is_non_negative() {
     log.phase("verify");
     let stdout_str = String::from_utf8_lossy(&output.stdout);
 
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str) {
-        if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
-            for provider in data {
-                if let Some(cost) = provider.get("sessionCostUsd").and_then(|c| c.as_f64()) {
-                    assert!(
-                        cost >= 0.0,
-                        "Session cost should be non-negative, got {}",
-                        cost
-                    );
-                }
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str)
+        && let Some(data) = json.get("data").and_then(|d| d.as_array())
+    {
+        for provider in data {
+            if let Some(cost) = provider
+                .get("sessionCostUsd")
+                .and_then(serde_json::Value::as_f64)
+            {
+                assert!(
+                    cost >= 0.0,
+                    "Session cost should be non-negative, got {cost}"
+                );
             }
         }
     }
@@ -414,16 +416,18 @@ fn cost_json_monthly_cost_is_non_negative() {
     log.phase("verify");
     let stdout_str = String::from_utf8_lossy(&output.stdout);
 
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str) {
-        if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
-            for provider in data {
-                if let Some(cost) = provider.get("last30DaysCostUsd").and_then(|c| c.as_f64()) {
-                    assert!(
-                        cost >= 0.0,
-                        "Monthly cost should be non-negative, got {}",
-                        cost
-                    );
-                }
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str)
+        && let Some(data) = json.get("data").and_then(|d| d.as_array())
+    {
+        for provider in data {
+            if let Some(cost) = provider
+                .get("last30DaysCostUsd")
+                .and_then(serde_json::Value::as_f64)
+            {
+                assert!(
+                    cost >= 0.0,
+                    "Monthly cost should be non-negative, got {cost}"
+                );
             }
         }
     }
@@ -445,36 +449,33 @@ fn cost_json_token_counts_are_integers() {
     log.phase("verify");
     let stdout_str = String::from_utf8_lossy(&output.stdout);
 
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str) {
-        if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
-            for provider in data {
-                // Check session tokens
-                if let Some(tokens) = provider.get("sessionTokens") {
-                    if !tokens.is_null() {
-                        assert!(
-                            tokens.is_i64() || tokens.is_u64(),
-                            "Session tokens should be an integer, got {:?}",
-                            tokens
-                        );
-                        let count = tokens.as_i64().unwrap_or(0);
-                        assert!(
-                            count >= 0,
-                            "Token count should be non-negative, got {}",
-                            count
-                        );
-                    }
-                }
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str)
+        && let Some(data) = json.get("data").and_then(|d| d.as_array())
+    {
+        for provider in data {
+            // Check session tokens
+            if let Some(tokens) = provider.get("sessionTokens")
+                && !tokens.is_null()
+            {
+                assert!(
+                    tokens.is_i64() || tokens.is_u64(),
+                    "Session tokens should be an integer, got {tokens:?}"
+                );
+                let count = tokens.as_i64().unwrap_or(0);
+                assert!(
+                    count >= 0,
+                    "Token count should be non-negative, got {count}"
+                );
+            }
 
-                // Check last 30 days tokens
-                if let Some(tokens) = provider.get("last30DaysTokens") {
-                    if !tokens.is_null() {
-                        assert!(
-                            tokens.is_i64() || tokens.is_u64(),
-                            "Monthly tokens should be an integer, got {:?}",
-                            tokens
-                        );
-                    }
-                }
+            // Check last 30 days tokens
+            if let Some(tokens) = provider.get("last30DaysTokens")
+                && !tokens.is_null()
+            {
+                assert!(
+                    tokens.is_i64() || tokens.is_u64(),
+                    "Monthly tokens should be an integer, got {tokens:?}"
+                );
             }
         }
     }
@@ -664,28 +665,28 @@ fn cost_json_daily_entries_valid() {
     log.phase("verify");
     let stdout_str = String::from_utf8_lossy(&output.stdout);
 
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str) {
-        if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
-            for provider in data {
-                if let Some(daily) = provider.get("daily").and_then(|d| d.as_array()) {
-                    for entry in daily {
-                        // Check date format (YYYY-MM-DD)
-                        if let Some(date) = entry.get("date").and_then(|d| d.as_str()) {
-                            let parts: Vec<&str> = date.split('-').collect();
-                            assert_eq!(parts.len(), 3, "Date should be YYYY-MM-DD format");
-                            // Verify year, month, day are numeric
-                            for part in parts {
-                                assert!(
-                                    part.chars().all(|c| c.is_ascii_digit()),
-                                    "Date parts should be numeric"
-                                );
-                            }
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout_str)
+        && let Some(data) = json.get("data").and_then(|d| d.as_array())
+    {
+        for provider in data {
+            if let Some(daily) = provider.get("daily").and_then(|d| d.as_array()) {
+                for entry in daily {
+                    // Check date format (YYYY-MM-DD)
+                    if let Some(date) = entry.get("date").and_then(|d| d.as_str()) {
+                        let parts: Vec<&str> = date.split('-').collect();
+                        assert_eq!(parts.len(), 3, "Date should be YYYY-MM-DD format");
+                        // Verify year, month, day are numeric
+                        for part in parts {
+                            assert!(
+                                part.chars().all(|c| c.is_ascii_digit()),
+                                "Date parts should be numeric"
+                            );
                         }
+                    }
 
-                        // Check total cost is non-negative
-                        if let Some(cost) = entry.get("totalCost").and_then(|c| c.as_f64()) {
-                            assert!(cost >= 0.0, "Daily cost should be non-negative");
-                        }
+                    // Check total cost is non-negative
+                    if let Some(cost) = entry.get("totalCost").and_then(serde_json::Value::as_f64) {
+                        assert!(cost >= 0.0, "Daily cost should be non-negative");
                     }
                 }
             }

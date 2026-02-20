@@ -78,9 +78,10 @@ pub fn load_fixture_text(path: &str) -> String {
         .unwrap_or_else(|e| panic!("Failed to read fixture {}: {}", full_path.display(), e))
 }
 
-/// Load a raw JSON fixture file as serde_json::Value.
+/// Load a raw JSON fixture file as `serde_json::Value`.
 ///
 /// Useful when you need to inspect or modify the JSON dynamically.
+#[allow(dead_code)]
 pub fn load_fixture_json(path: &str) -> serde_json::Value {
     load_fixture(path)
 }
@@ -141,6 +142,7 @@ pub fn usage_snapshot_full(
 }
 
 /// Create a minimal `UsageSnapshot` with only primary window.
+#[allow(dead_code)]
 #[must_use]
 pub fn usage_snapshot_minimal(primary_pct: f64) -> UsageSnapshot {
     UsageSnapshot::new(RateWindow::new(primary_pct))
@@ -158,9 +160,9 @@ pub fn rate_window(used_pct: f64, window_minutes: i32) -> RateWindow {
     let reset_desc = if hours >= 24 {
         format!("resets in {}d", hours / 24)
     } else if hours > 0 {
-        format!("resets in {}h", hours)
+        format!("resets in {hours}h")
     } else {
-        format!("resets in {}m", window_minutes)
+        format!("resets in {window_minutes}m")
     };
 
     RateWindow {
@@ -289,6 +291,7 @@ pub fn credits_snapshot(remaining: f64) -> CreditsSnapshot {
 }
 
 /// Create a minimal `CreditsSnapshot` with no events.
+#[allow(dead_code)]
 #[must_use]
 pub fn credits_snapshot_minimal(remaining: f64) -> CreditsSnapshot {
     CreditsSnapshot {
@@ -349,6 +352,7 @@ pub fn cost_payload(
 }
 
 /// Create a minimal `CostPayload` with no data.
+#[allow(dead_code)]
 #[must_use]
 pub fn cost_payload_minimal(provider: &str) -> CostPayload {
     CostPayload {

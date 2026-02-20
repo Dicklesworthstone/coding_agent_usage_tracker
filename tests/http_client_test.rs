@@ -10,7 +10,6 @@ mod common;
 
 use std::time::Duration;
 
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -172,9 +171,9 @@ async fn fetch_json_401_unauthorized() {
     let err = result.unwrap_err();
     match &err {
         CautError::Network(msg) => {
-            assert!(msg.contains("401"), "Error should mention 401: {}", msg);
+            assert!(msg.contains("401"), "Error should mention 401: {msg}");
         }
-        other => panic!("Expected Network error, got: {:?}", other),
+        other => panic!("Expected Network error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -202,9 +201,9 @@ async fn fetch_json_403_forbidden() {
     let err = result.unwrap_err();
     match &err {
         CautError::Network(msg) => {
-            assert!(msg.contains("403"), "Error should mention 403: {}", msg);
+            assert!(msg.contains("403"), "Error should mention 403: {msg}");
         }
-        other => panic!("Expected Network error, got: {:?}", other),
+        other => panic!("Expected Network error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -236,9 +235,9 @@ async fn fetch_json_429_rate_limited() {
     let err = result.unwrap_err();
     match &err {
         CautError::Network(msg) => {
-            assert!(msg.contains("429"), "Error should mention 429: {}", msg);
+            assert!(msg.contains("429"), "Error should mention 429: {msg}");
         }
-        other => panic!("Expected Network error, got: {:?}", other),
+        other => panic!("Expected Network error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -266,9 +265,9 @@ async fn fetch_json_500_server_error() {
     let err = result.unwrap_err();
     match &err {
         CautError::Network(msg) => {
-            assert!(msg.contains("500"), "Error should mention 500: {}", msg);
+            assert!(msg.contains("500"), "Error should mention 500: {msg}");
         }
-        other => panic!("Expected Network error, got: {:?}", other),
+        other => panic!("Expected Network error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -296,9 +295,9 @@ async fn fetch_json_502_bad_gateway() {
     let err = result.unwrap_err();
     match &err {
         CautError::Network(msg) => {
-            assert!(msg.contains("502"), "Error should mention 502: {}", msg);
+            assert!(msg.contains("502"), "Error should mention 502: {msg}");
         }
-        other => panic!("Expected Network error, got: {:?}", other),
+        other => panic!("Expected Network error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -326,9 +325,9 @@ async fn fetch_json_503_service_unavailable() {
     let err = result.unwrap_err();
     match &err {
         CautError::Network(msg) => {
-            assert!(msg.contains("503"), "Error should mention 503: {}", msg);
+            assert!(msg.contains("503"), "Error should mention 503: {msg}");
         }
-        other => panic!("Expected Network error, got: {:?}", other),
+        other => panic!("Expected Network error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -360,9 +359,9 @@ async fn fetch_json_invalid_json_response() {
     let err = result.unwrap_err();
     match &err {
         CautError::ParseResponse(msg) => {
-            log.debug(&format!("Got expected parse error: {}", msg));
+            log.debug(&format!("Got expected parse error: {msg}"));
         }
-        other => panic!("Expected ParseResponse error, got: {:?}", other),
+        other => panic!("Expected ParseResponse error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -389,7 +388,7 @@ async fn fetch_json_empty_response() {
     assert!(result.is_err());
     match &result.unwrap_err() {
         CautError::ParseResponse(_) => {}
-        other => panic!("Expected ParseResponse error, got: {:?}", other),
+        other => panic!("Expected ParseResponse error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -404,12 +403,10 @@ async fn fetch_json_wrong_json_structure() {
     // Return valid JSON but wrong structure for TestPayload
     Mock::given(method("GET"))
         .and(path("/api/wrong"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(&serde_json::json!({
-                "different": "structure",
-                "unexpected": 123
-            })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "different": "structure",
+            "unexpected": 123
+        })))
         .mount(&mock_server)
         .await;
 
@@ -422,7 +419,7 @@ async fn fetch_json_wrong_json_structure() {
     assert!(result.is_err());
     match &result.unwrap_err() {
         CautError::ParseResponse(_) => {}
-        other => panic!("Expected ParseResponse error, got: {:?}", other),
+        other => panic!("Expected ParseResponse error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -469,11 +466,10 @@ async fn fetch_json_timeout_on_slow_response() {
             // Note: The implementation uses DEFAULT_TIMEOUT in the error regardless of actual timeout
             // The important thing is that we got a Timeout error, not the specific value
             log.debug(&format!(
-                "Got expected timeout error (reports {} seconds)",
-                secs
+                "Got expected timeout error (reports {secs} seconds)"
             ));
         }
-        other => panic!("Expected Timeout error, got: {:?}", other),
+        other => panic!("Expected Timeout error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -499,9 +495,9 @@ async fn fetch_json_connection_refused() {
     let err = result.unwrap_err();
     match &err {
         CautError::Network(msg) => {
-            log.debug(&format!("Got expected network error: {}", msg));
+            log.debug(&format!("Got expected network error: {msg}"));
         }
-        other => panic!("Expected Network error, got: {:?}", other),
+        other => panic!("Expected Network error, got: {other:?}"),
     }
     log.finish_ok();
 }
@@ -595,8 +591,8 @@ async fn fetch_json_claude_rate_limit_format() {
             },
             "tokens": {
                 "used": 50000,
-                "limit": 200000,
-                "remaining": 150000
+                "limit": 200_000,
+                "remaining": 150_000
             },
             "resets_at": "2026-01-18T12:00:00Z"
         }
@@ -644,7 +640,7 @@ async fn fetch_json_openai_rate_limit_format() {
         },
         "limits": {
             "requests_per_minute": 60,
-            "tokens_per_minute": 100000
+            "tokens_per_minute": 100_000
         }
     });
 

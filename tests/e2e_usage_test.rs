@@ -73,7 +73,7 @@ impl Drop for EnvGuard {
     }
 }
 
-fn make_test_cli() -> Cli {
+const fn make_test_cli() -> Cli {
     Cli {
         command: None,
         format: OutputFormat::Human,
@@ -87,7 +87,7 @@ fn make_test_cli() -> Cli {
     }
 }
 
-fn make_test_usage_args() -> UsageArgs {
+const fn make_test_usage_args() -> UsageArgs {
     UsageArgs {
         provider: None,
         account: None,
@@ -111,6 +111,7 @@ fn make_test_usage_args() -> UsageArgs {
 // =============================================================================
 
 /// Get the caut binary command.
+#[allow(deprecated)]
 fn caut_cmd() -> Command {
     // Try standard cargo_bin first
     if let Ok(cmd) = Command::cargo_bin("caut") {
@@ -317,8 +318,7 @@ fn usage_pretty_json_is_formatted() {
     let line_count = stdout_str.lines().count();
     assert!(
         line_count > 1,
-        "Pretty JSON should have multiple lines, got {}",
-        line_count
+        "Pretty JSON should have multiple lines, got {line_count}"
     );
 
     // Should still be valid JSON

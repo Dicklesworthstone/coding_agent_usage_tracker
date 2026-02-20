@@ -86,6 +86,7 @@ impl LogLevel {
 
     /// Get ANSI color code for this level.
     #[must_use]
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub const fn color_code(&self) -> &'static str {
         match self {
             Self::Trace => "\x1b[90m", // Gray
@@ -162,9 +163,7 @@ pub fn init_test_logging() {
     let _ = MIN_LEVEL.set(level);
 
     // Check JSON mode
-    let json = env::var("TEST_LOG_JSON")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false);
+    let json = env::var("TEST_LOG_JSON").is_ok_and(|v| v == "1" || v.to_lowercase() == "true");
     let _ = JSON_MODE.set(json);
 
     // Check color mode
@@ -172,9 +171,8 @@ pub fn init_test_logging() {
     let _ = NO_COLOR.set(no_color);
 
     // Open log file
-    let log_path = env::var("TEST_LOG_FILE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("test-results.log"));
+    let log_path =
+        env::var("TEST_LOG_FILE").map_or_else(|_| PathBuf::from("test-results.log"), PathBuf::from);
 
     let file = OpenOptions::new()
         .create(true)
@@ -205,12 +203,11 @@ fn use_color() -> bool {
 }
 
 fn write_to_file(content: &str) {
-    if let Some(file_mutex) = LOG_FILE.get() {
-        if let Ok(mut guard) = file_mutex.lock() {
-            if let Some(ref mut file) = *guard {
-                let _ = writeln!(file, "{content}");
-            }
-        }
+    if let Some(file_mutex) = LOG_FILE.get()
+        && let Ok(mut guard) = file_mutex.lock()
+        && let Some(ref mut file) = *guard
+    {
+        let _ = writeln!(file, "{content}");
     }
 }
 
@@ -319,6 +316,7 @@ impl TestLogger {
     }
 
     /// Mark test as passed with duration.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn finish_ok(&self) {
         let duration_ms = self.start_time.elapsed().as_millis() as u64;
         let msg = format!("Test passed (duration: {duration_ms}ms)");
@@ -326,6 +324,7 @@ impl TestLogger {
     }
 
     /// Mark test as failed with reason.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn finish_err(&self, reason: &str) {
         let duration_ms = self.start_time.elapsed().as_millis() as u64;
         let msg = format!("Test FAILED: {reason} (duration: {duration_ms}ms)");
@@ -334,6 +333,7 @@ impl TestLogger {
 
     /// Get elapsed time since test start.
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn elapsed_ms(&self) -> u64 {
         self.start_time.elapsed().as_millis() as u64
     }
@@ -438,7 +438,7 @@ fn strip_ansi(s: &str) -> String {
     result
 }
 
-/// Quick log a message without a TestLogger instance.
+/// Quick log a message without a `TestLogger` instance.
 ///
 /// Useful for one-off logging in test setup/teardown.
 pub fn log_test_message(test_name: &str, level: LogLevel, message: &str) {

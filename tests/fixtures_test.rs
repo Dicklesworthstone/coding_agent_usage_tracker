@@ -5,11 +5,10 @@
 mod common;
 
 use common::fixtures::{
-    StatusIndicator, cost_payload, credits_snapshot, load_fixture, load_fixture_json,
-    load_fixture_text, provider_identity, provider_identity_full, provider_payload,
-    provider_payload_default, rate_window, status_critical, status_major, status_minor,
-    status_operational, status_payload, usage_snapshot, usage_snapshot_full,
-    usage_snapshot_minimal,
+    StatusIndicator, cost_payload, credits_snapshot, load_fixture, load_fixture_text,
+    provider_identity, provider_identity_full, provider_payload, provider_payload_default,
+    rate_window, status_critical, status_major, status_minor, status_operational, status_payload,
+    usage_snapshot, usage_snapshot_full, usage_snapshot_minimal,
 };
 
 // =============================================================================

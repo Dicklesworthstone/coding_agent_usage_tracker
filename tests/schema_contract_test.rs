@@ -725,7 +725,7 @@ fn test_cost_payload_full() {
             "updatedAt": "2026-01-18T10:30:00Z",
             "sessionTokens": 12345,
             "sessionCostUsd": 0.15,
-            "last30DaysTokens": 500000,
+            "last30DaysTokens": 500_000,
             "last30DaysCostUsd": 5.50,
             "daily": [{
                 "date": "2026-01-18",
@@ -735,9 +735,9 @@ fn test_cost_payload_full() {
                 "totalCost": 0.15
             }],
             "totals": {
-                "inputTokens": 400000,
-                "outputTokens": 100000,
-                "totalTokens": 500000,
+                "inputTokens": 400_000,
+                "outputTokens": 100_000,
+                "totalTokens": 500_000,
                 "totalCost": 5.50
             }
         }],
@@ -878,8 +878,7 @@ fn test_status_indicator_all_values() {
 
         assert!(
             schema.is_valid(&valid),
-            "Status indicator '{}' should be valid",
-            indicator
+            "Status indicator '{indicator}' should be valid"
         );
     }
 }
@@ -1120,9 +1119,8 @@ fn test_camel_case_naming() {
 
     for field in fields_to_check {
         assert!(
-            !schema_str.contains(&format!("\"{}\"", field)),
-            "Found snake_case field: {}",
-            field
+            !schema_str.contains(&format!("\"{field}\"")),
+            "Found snake_case field: {field}"
         );
     }
 }

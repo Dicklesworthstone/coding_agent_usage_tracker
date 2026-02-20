@@ -7,6 +7,7 @@
 //! - Data retention and pruning
 //! - Performance benchmarks
 //! - Concurrent access patterns
+#![allow(clippy::cast_precision_loss)]
 
 use std::sync::Arc;
 use std::thread;
@@ -17,10 +18,7 @@ use tempfile::TempDir;
 
 use caut::core::models::{ProviderIdentity, RateWindow, UsageSnapshot};
 use caut::core::provider::Provider;
-use caut::storage::history::{
-    DEFAULT_AGGREGATE_RETENTION_DAYS, DEFAULT_DETAILED_RETENTION_DAYS, HistoryStore, PruneResult,
-    RetentionPolicy, StatsPeriod, StoredSnapshot,
-};
+use caut::storage::history::{HistoryStore, RetentionPolicy, StatsPeriod};
 
 mod common;
 
@@ -141,11 +139,11 @@ fn test_migration_idempotence() {
 
     // Open multiple times to verify migrations don't run twice
     for i in 0..3 {
-        let store = HistoryStore::open(&db_path).expect(&format!("open {}", i));
+        let store = HistoryStore::open(&db_path).unwrap_or_else(|_| panic!("open {i}"));
         let count = store
             .count_rows("schema_migrations")
             .expect("count migrations");
-        assert_eq!(count, 2, "Should have exactly 2 migrations after run {}", i);
+        assert_eq!(count, 2, "Should have exactly 2 migrations after run {i}");
     }
 }
 
@@ -411,7 +409,7 @@ fn test_stats_computation() {
     }
 
     let stats = store
-        .get_stats(&Provider::Claude, StatsPeriod::Today)
+        .get_stats(&Provider::Claude, &StatsPeriod::Today)
         .expect("stats");
 
     assert_eq!(stats.sample_count, 5);
@@ -425,7 +423,7 @@ fn test_stats_empty_period() {
     let store = HistoryStore::open_in_memory().expect("open store");
 
     let stats = store
-        .get_stats(&Provider::Claude, StatsPeriod::Yesterday)
+        .get_stats(&Provider::Claude, &StatsPeriod::Yesterday)
         .expect("stats");
 
     assert_eq!(stats.sample_count, 0);
@@ -447,7 +445,7 @@ fn test_stats_last_7_days() {
     }
 
     let stats = store
-        .get_stats(&Provider::Codex, StatsPeriod::Last7Days)
+        .get_stats(&Provider::Codex, &StatsPeriod::Last7Days)
         .expect("stats");
 
     assert_eq!(stats.sample_count, 7);
@@ -661,7 +659,7 @@ fn test_concurrent_read_write() {
         let path = Arc::clone(&path);
         let handle = thread::spawn(move || {
             let store = HistoryStore::open(&path).expect("open");
-            let snapshot = make_snapshot(now, (50 + i * 5) as f64);
+            let snapshot = make_snapshot(now, f64::from(50 + i * 5));
             store
                 .record_snapshot(&snapshot, &Provider::Codex)
                 .expect("write");
@@ -779,8 +777,7 @@ fn bench_get_latest_all_100_providers() {
     // Should be fast
     assert!(
         elapsed.as_millis() < 100,
-        "get_latest_all too slow: {:?}",
-        elapsed
+        "get_latest_all too slow: {elapsed:?}"
     );
 
     println!(
@@ -798,7 +795,7 @@ fn bench_velocity_computation() {
     // Insert data points over 24 hours
     for i in 0..100 {
         let time = now - Duration::minutes(i * 15); // Every 15 minutes
-        let pct = 10.0 + (i as f64 * 0.5); // Slowly increasing
+        let pct = (i as f64).mul_add(0.5, 10.0); // Slowly increasing
         store
             .record_snapshot(&make_snapshot(time, pct), &Provider::Claude)
             .expect("record");
@@ -815,11 +812,10 @@ fn bench_velocity_computation() {
     // 100 velocity computations should be fast
     assert!(
         elapsed.as_millis() < 500,
-        "Velocity computation too slow: {:?} for 100 calls",
-        elapsed
+        "Velocity computation too slow: {elapsed:?} for 100 calls"
     );
 
-    println!("Performance: 100 velocity computations in {:?}", elapsed);
+    println!("Performance: 100 velocity computations in {elapsed:?}");
 }
 
 #[test]
@@ -853,7 +849,7 @@ fn bench_prune_large_dataset() {
     assert!(result.aggregates_created > 0);
 
     // Prune should be fast
-    assert!(elapsed.as_secs() < 5, "Prune too slow: {:?}", elapsed);
+    assert!(elapsed.as_secs() < 5, "Prune too slow: {elapsed:?}");
 
     println!(
         "Performance: prune {} rows in {:?}",
