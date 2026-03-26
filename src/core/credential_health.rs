@@ -574,36 +574,112 @@ pub fn check_oauth_file(path: &Path) -> CredentialHealth {
 }
 
 /// Check OAuth credentials from JSON content.
+///
+/// Handles multiple credential file formats:
+/// - Direct top-level tokens: `{"access_token": "...", "refresh_token": "..."}`
+/// - Codex `auth.json` format: `{"tokens": {"access_token": "...", "id_token": "..."}}`
+///   or `{"OPENAI_API_KEY": "sk-..."}`
+/// - Claude `.credentials.json` format: `{"claudeAiOauth": {"accessToken": "..."}}`
 #[must_use]
 pub fn check_oauth_json(json: &str) -> CredentialHealth {
-    #[derive(Deserialize)]
-    #[allow(clippy::struct_field_names)]
-    struct OAuthTokens {
-        #[serde(default)]
-        access_token: Option<String>,
-        #[serde(default)]
-        id_token: Option<String>,
-        #[serde(default)]
-        refresh_token: Option<String>,
-    }
-
-    // Try to parse as direct tokens
-    let tokens: OAuthTokens = match serde_json::from_str(json) {
-        Ok(t) => t,
+    // Parse into a generic JSON value first so we can probe multiple shapes
+    let value: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
         Err(e) => return CredentialHealth::CheckFailed(format!("invalid JSON: {e}")),
     };
 
+    // Strategy 1: Direct top-level tokens (generic OAuth files)
+    //   {"access_token": "...", "id_token": "...", "refresh_token": "..."}
+    {
+        let access = value
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let id = value
+            .get("id_token")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let refresh = value
+            .get("refresh_token")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+
+        if access.is_some() || id.is_some() {
+            return check_token_triple(access.or(id), refresh);
+        }
+    }
+
+    // Strategy 2: Codex auth.json - tokens nested under "tokens" key
+    //   {"tokens": {"access_token": "...", "id_token": "..."}}
+    if let Some(tokens_obj) = value.get("tokens") {
+        let access = tokens_obj
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let id = tokens_obj
+            .get("id_token")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let refresh = tokens_obj
+            .get("refresh_token")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+
+        if access.is_some() || id.is_some() {
+            return check_token_triple(access.or(id), refresh);
+        }
+    }
+
+    // Strategy 3: Codex API key auth
+    //   {"OPENAI_API_KEY": "sk-..."}
+    if value
+        .get("OPENAI_API_KEY")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty())
+    {
+        return CredentialHealth::ApiKeyPresent;
+    }
+
+    // Also check lowercase variant used by some configs
+    if value
+        .get("apiKey")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty())
+    {
+        return CredentialHealth::ApiKeyPresent;
+    }
+
+    // Strategy 4: Claude .credentials.json - tokens under "claudeAiOauth"
+    //   {"claudeAiOauth": {"accessToken": "...", "refreshToken": "..."}}
+    if let Some(claude_oauth) = value.get("claudeAiOauth") {
+        let access = claude_oauth
+            .get("accessToken")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let refresh = claude_oauth
+            .get("refreshToken")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+
+        if access.is_some() {
+            return check_token_triple(access, refresh);
+        }
+    }
+
+    // No tokens found in any known format
+    CredentialHealth::Missing
+}
+
+/// Check a set of extracted token strings and return the appropriate health status.
+fn check_token_triple(access_or_id: Option<&str>, refresh: Option<&str>) -> CredentialHealth {
     let checker = JwtHealthChecker::new();
 
-    // Check access/id token (use id_token if access_token not present)
-    let access_token = tokens.access_token.as_ref().or(tokens.id_token.as_ref());
-    let access_health = match access_token {
+    let access_health = match access_or_id {
         Some(token) => checker.check(token),
         None => return CredentialHealth::Missing,
     };
 
-    // Check refresh token if present
-    match tokens.refresh_token.as_ref() {
+    match refresh {
         Some(refresh_token) => {
             let refresh_health = checker.check(refresh_token);
             CredentialHealth::OAuth(OAuthHealth::with_refresh(access_health, refresh_health))
@@ -1153,6 +1229,74 @@ mod tests {
     fn check_oauth_json_invalid_json() {
         let health = check_oauth_json("not json {{{");
         assert!(matches!(health, CredentialHealth::CheckFailed(_)));
+    }
+
+    #[test]
+    fn check_oauth_json_codex_nested_tokens() {
+        // Codex auth.json nests tokens under "tokens" key
+        let id_token = make_jwt_with_exp(86400);
+        let json = format!(
+            r#"{{"tokens":{{"id_token":"{id_token}","access_token":"acc","account_id":"acct_123"}}}}"#
+        );
+
+        let health = check_oauth_json(&json);
+        assert!(
+            matches!(health, CredentialHealth::OAuth(_)),
+            "Expected OAuth health for Codex nested tokens, got {health:?}"
+        );
+    }
+
+    #[test]
+    fn check_oauth_json_codex_api_key() {
+        // Codex auth.json with only OPENAI_API_KEY
+        let json = r#"{"OPENAI_API_KEY": "sk-test-key-123"}"#;
+
+        let health = check_oauth_json(json);
+        assert!(
+            matches!(health, CredentialHealth::ApiKeyPresent),
+            "Expected ApiKeyPresent for Codex API key auth, got {health:?}"
+        );
+    }
+
+    #[test]
+    fn check_oauth_json_codex_api_key_lowercase() {
+        let json = r#"{"apiKey": "sk-test-key-456"}"#;
+
+        let health = check_oauth_json(json);
+        assert!(
+            matches!(health, CredentialHealth::ApiKeyPresent),
+            "Expected ApiKeyPresent for apiKey field, got {health:?}"
+        );
+    }
+
+    #[test]
+    fn check_oauth_json_claude_credentials() {
+        // Claude .credentials.json format
+        let access = make_jwt_with_exp(86400);
+        let json = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"{access}","subscriptionType":"team"}}}}"#
+        );
+
+        let health = check_oauth_json(&json);
+        assert!(
+            matches!(health, CredentialHealth::OAuth(_)),
+            "Expected OAuth health for Claude credentials, got {health:?}"
+        );
+    }
+
+    #[test]
+    fn check_oauth_json_claude_credentials_with_refresh() {
+        let access = make_jwt_with_exp(86400);
+        let refresh = make_jwt_with_exp(86400 * 30);
+        let json = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"{access}","refreshToken":"{refresh}","subscriptionType":"pro"}}}}"#
+        );
+
+        let health = check_oauth_json(&json);
+        assert!(
+            matches!(health, CredentialHealth::OAuth(_)),
+            "Expected OAuth health for Claude credentials with refresh, got {health:?}"
+        );
     }
 
     // =========================================================================

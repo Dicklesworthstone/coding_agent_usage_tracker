@@ -151,17 +151,30 @@ impl Provider {
     }
 
     /// Default timeout for provider fetch operations.
+    ///
+    /// Windows process spawning is significantly slower than Unix (cmd.exe
+    /// overhead, antivirus hooks, etc.), so each CLI subprocess invocation
+    /// can take 1-3s even for trivial commands. The fetch pipeline may
+    /// invoke several subprocesses sequentially (version check, multiple
+    /// rate-limit probes), so we use generous timeouts to avoid false
+    /// "request timeout" errors on slower machines.
     #[must_use]
     pub const fn default_timeout(self) -> Duration {
         match self {
             // API/OAuth providers can be a bit slower
-            Self::Gemini | Self::VertexAI => Duration::from_secs(15),
+            Self::Gemini | Self::VertexAI => Duration::from_secs(30),
             // Local CLIs or lightweight sources
             Self::Cursor | Self::Copilot | Self::Kiro | Self::JetBrainsAI | Self::Amp => {
-                Duration::from_secs(8)
+                Duration::from_secs(15)
             }
-            // Default for most providers
-            _ => Duration::from_secs(10),
+            // Primary providers: CLI fetch tries multiple subprocess
+            // invocations sequentially (version + JSON probes + fallbacks),
+            // each needing time to spawn. 30s accommodates slow Windows
+            // environments where doctor --help succeeds in ~700ms but
+            // the full fetch pipeline can exceed 10s.
+            Self::Claude | Self::Codex => Duration::from_secs(30),
+            // Default for other providers
+            _ => Duration::from_secs(20),
         }
     }
 
@@ -515,9 +528,9 @@ mod tests {
 
     #[test]
     fn provider_default_timeout_values() {
-        assert_eq!(Provider::Claude.default_timeout().as_secs(), 10);
-        assert_eq!(Provider::Codex.default_timeout().as_secs(), 10);
-        assert_eq!(Provider::Gemini.default_timeout().as_secs(), 15);
-        assert_eq!(Provider::Cursor.default_timeout().as_secs(), 8);
+        assert_eq!(Provider::Claude.default_timeout().as_secs(), 30);
+        assert_eq!(Provider::Codex.default_timeout().as_secs(), 30);
+        assert_eq!(Provider::Gemini.default_timeout().as_secs(), 30);
+        assert_eq!(Provider::Cursor.default_timeout().as_secs(), 15);
     }
 }
