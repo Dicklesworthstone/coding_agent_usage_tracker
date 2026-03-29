@@ -484,7 +484,7 @@ pub fn provider_style(name: &str, theme: &ThemeConfig) -> Style {
 /// - Closing: `[/]`, `[/bold]`
 static MARKUP_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     // Pattern matches valid markup tags but not array indices like [0]
-    Regex::new(r"\[/?[a-zA-Z_#][a-zA-Z0-9_# (),]*\]").unwrap()
+    Regex::new(r"\[(?:/|/[a-zA-Z_#][a-zA-Z0-9_# (),]*|[a-zA-Z_#][a-zA-Z0-9_# (),]*)\]").unwrap()
 });
 
 /// Regex for stripping ANSI escape sequences.
@@ -872,13 +872,49 @@ pub fn collect_rich_diagnostics(format: OutputFormat, no_color_flag: bool) -> St
 mod tests {
     use super::*;
     use crate::test_utils::make_test_provider_payload;
+    use std::cell::Cell;
     use tracing_test::traced_test;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    thread_local! {
+        static ENV_LOCK_DEPTH: Cell<usize> = const { Cell::new(0) };
+    }
+
+    struct EnvScopeGuard {
+        _guard: Option<std::sync::MutexGuard<'static, ()>>,
+    }
+
+    impl EnvScopeGuard {
+        fn acquire() -> Self {
+            let already_held = ENV_LOCK_DEPTH.with(|depth| {
+                let current = depth.get();
+                depth.set(current + 1);
+                current > 0
+            });
+
+            let guard = if already_held {
+                None
+            } else {
+                Some(ENV_LOCK.lock().unwrap())
+            };
+
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for EnvScopeGuard {
+        fn drop(&mut self) {
+            ENV_LOCK_DEPTH.with(|depth| {
+                let current = depth.get();
+                depth.set(current.saturating_sub(1));
+            });
+        }
+    }
+
     #[allow(unsafe_code)]
     fn with_env_var(key: &str, value: &str, f: impl FnOnce()) {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = EnvScopeGuard::acquire();
         let prior = std::env::var(key).ok();
         unsafe {
             std::env::set_var(key, value);
@@ -896,7 +932,7 @@ mod tests {
 
     #[allow(unsafe_code)]
     fn without_env_var(key: &str, f: impl FnOnce()) {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = EnvScopeGuard::acquire();
         let prior = std::env::var(key).ok();
         unsafe {
             std::env::remove_var(key);

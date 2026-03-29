@@ -88,6 +88,10 @@ async fn run(cli: Cli) -> caut::Result<()> {
             caut::cli::usage::execute(&args, format, pretty, no_color).await
         }
 
+        Some(Commands::Daemon(cmd)) => {
+            caut::cli::daemon::execute(&cmd, format, pretty, no_color).await
+        }
+
         Some(Commands::Cost(args)) => {
             caut::cli::cost::execute(&args, format, pretty, no_color).await
         }
@@ -254,6 +258,7 @@ COMMANDS:
     cost            Show local cost usage
     session         Show session cost attribution
     dashboard       Launch interactive TUI dashboard
+    daemon          Manage resident usage daemon
     history         Manage usage history and retention
     token-accounts  Manage token accounts
     doctor          Diagnose caut setup and provider health

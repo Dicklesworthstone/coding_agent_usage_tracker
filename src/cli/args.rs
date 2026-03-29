@@ -67,6 +67,10 @@ pub enum Commands {
     /// Show usage for providers (default command)
     Usage(UsageArgs),
 
+    /// Manage the resident usage daemon
+    #[command(subcommand)]
+    Daemon(DaemonCommand),
+
     /// Show local cost usage
     Cost(CostArgs),
 
@@ -102,6 +106,56 @@ pub enum HistoryCommand {
     Stats,
     /// Export history data to JSON or CSV
     Export(HistoryExportArgs),
+}
+
+/// Daemon subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum DaemonCommand {
+    /// Start the resident daemon in the background
+    Start(DaemonStartArgs),
+    /// Return the latest cached resident snapshot quickly
+    Status,
+    /// Trigger an asynchronous refresh and return immediately
+    Refresh,
+    /// Stop the resident daemon and clean up metadata
+    Stop,
+    /// Run the resident daemon process (internal)
+    #[command(hide = true)]
+    Run(DaemonStartArgs),
+}
+
+/// Arguments for `daemon start` and internal `daemon run`.
+#[derive(Parser, Debug, Clone)]
+pub struct DaemonStartArgs {
+    #[command(flatten)]
+    pub usage: UsageArgs,
+}
+
+impl DaemonStartArgs {
+    /// Convert to usage args for the shared fetch pipeline.
+    #[must_use]
+    pub fn to_usage_args(&self) -> UsageArgs {
+        let mut usage = self.usage.clone();
+        usage.watch = false;
+        usage.tui = false;
+        usage
+    }
+
+    /// Validate daemon settings.
+    ///
+    /// # Errors
+    /// Returns an error when the underlying usage arguments are invalid or the
+    /// daemon interval is zero.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        let usage = self.to_usage_args();
+        usage.validate()?;
+        if usage.interval == 0 {
+            return Err(crate::error::CautError::Config(
+                "Daemon interval must be greater than 0 seconds".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Arguments for `history show`.

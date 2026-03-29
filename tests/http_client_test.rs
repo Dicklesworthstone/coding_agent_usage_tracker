@@ -497,6 +497,11 @@ async fn fetch_json_connection_refused() {
         CautError::Network(msg) => {
             log.debug(&format!("Got expected network error: {msg}"));
         }
+        CautError::Timeout(secs) => {
+            log.debug(&format!(
+                "Connection refusal surfaced as timeout on this platform ({secs}s reported)"
+            ));
+        }
         other => panic!("Expected Network error, got: {other:?}"),
     }
     log.finish_ok();

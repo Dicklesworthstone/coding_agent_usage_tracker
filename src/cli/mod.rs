@@ -2,6 +2,7 @@
 
 pub mod args;
 pub mod cost;
+pub mod daemon;
 pub mod doctor;
 pub mod history;
 pub mod prompt;

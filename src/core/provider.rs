@@ -155,13 +155,13 @@ impl Provider {
     pub const fn default_timeout(self) -> Duration {
         match self {
             // API/OAuth providers can be a bit slower
-            Self::Gemini | Self::VertexAI => Duration::from_secs(15),
+            Self::Gemini | Self::VertexAI => Duration::from_secs(45),
             // Local CLIs or lightweight sources
             Self::Cursor | Self::Copilot | Self::Kiro | Self::JetBrainsAI | Self::Amp => {
-                Duration::from_secs(8)
+                Duration::from_secs(38)
             }
-            // Default for most providers
-            _ => Duration::from_secs(10),
+            // Default for most providers - increased from 10s to 30s
+            _ => Duration::from_secs(30),
         }
     }
 
@@ -515,9 +515,9 @@ mod tests {
 
     #[test]
     fn provider_default_timeout_values() {
-        assert_eq!(Provider::Claude.default_timeout().as_secs(), 10);
-        assert_eq!(Provider::Codex.default_timeout().as_secs(), 10);
-        assert_eq!(Provider::Gemini.default_timeout().as_secs(), 15);
-        assert_eq!(Provider::Cursor.default_timeout().as_secs(), 8);
+        assert_eq!(Provider::Claude.default_timeout().as_secs(), 30);
+        assert_eq!(Provider::Codex.default_timeout().as_secs(), 30);
+        assert_eq!(Provider::Gemini.default_timeout().as_secs(), 45);
+        assert_eq!(Provider::Cursor.default_timeout().as_secs(), 38);
     }
 }

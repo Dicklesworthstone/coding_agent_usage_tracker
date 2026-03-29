@@ -246,8 +246,10 @@ fn render_summary(report: &DoctorReport, no_color: bool) -> String {
 const fn status_icon(is_ok: bool, no_color: bool) -> &'static str {
     if no_color {
         if is_ok { "[OK]" } else { "[!!]" }
+    } else if is_ok {
+        "\u{2713}" // ✓
     } else {
-        if is_ok { "\u{2713}" } else { "\u{2717}" } // ✓ ✗
+        "\u{2717}" // ✗
     }
 }
 

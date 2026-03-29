@@ -738,7 +738,14 @@ pub struct EffectiveProviderSettings {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::NamedTempFile;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> &'static Mutex<()> {
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn default_config_is_valid() {
@@ -928,6 +935,7 @@ pretty = true
 
     #[test]
     fn resolved_config_default_values() {
+        let _guard = env_lock().lock().unwrap();
         // Clear any env vars that might affect the test
         remove_env(ENV_PROVIDERS);
         remove_env(ENV_FORMAT);
@@ -950,6 +958,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_json_flag() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_FORMAT);
 
         let mut cli = make_test_cli();
@@ -963,6 +972,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_format_flag() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_FORMAT);
 
         let mut cli = make_test_cli();
@@ -976,6 +986,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_verbose_flag() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_VERBOSE);
 
         let mut cli = make_test_cli();
@@ -989,6 +1000,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_no_color_flag() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_NO_COLOR);
         remove_env(ENV_NO_COLOR_STD);
 
@@ -1003,6 +1015,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_pretty_flag() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_PRETTY);
 
         let mut cli = make_test_cli();
@@ -1016,6 +1029,7 @@ pretty = true
 
     #[test]
     fn resolved_config_usage_args_provider() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_PROVIDERS);
 
         let cli = make_test_cli();
@@ -1031,6 +1045,7 @@ pretty = true
 
     #[test]
     fn resolved_config_usage_args_provider_both() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_PROVIDERS);
 
         let cli = make_test_cli();
@@ -1046,6 +1061,7 @@ pretty = true
 
     #[test]
     fn resolved_config_usage_args_timeout() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_TIMEOUT);
 
         let cli = make_test_cli();
@@ -1123,6 +1139,7 @@ pretty = true
 
     #[test]
     fn is_env_truthy_values() {
+        let _guard = env_lock().lock().unwrap();
         set_env("TEST_TRUTHY_1", "1");
         set_env("TEST_TRUTHY_TRUE", "true");
         set_env("TEST_TRUTHY_YES", "yes");
@@ -1153,6 +1170,7 @@ pretty = true
 
     #[test]
     fn env_providers_comma_separated() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         set_env(ENV_PROVIDERS, "claude,codex");
 
@@ -1169,6 +1187,7 @@ pretty = true
 
     #[test]
     fn env_providers_single() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         set_env(ENV_PROVIDERS, "claude");
 
@@ -1184,6 +1203,7 @@ pretty = true
 
     #[test]
     fn env_format_override() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         set_env(ENV_FORMAT, "json");
 
@@ -1198,6 +1218,7 @@ pretty = true
 
     #[test]
     fn env_timeout_override() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         set_env(ENV_TIMEOUT, "90");
 
@@ -1212,6 +1233,7 @@ pretty = true
 
     #[test]
     fn env_no_color_override() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         remove_env(ENV_NO_COLOR_STD);
         set_env(ENV_NO_COLOR, "1");
@@ -1227,6 +1249,7 @@ pretty = true
 
     #[test]
     fn env_no_color_std_override() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         remove_env(ENV_NO_COLOR);
         set_env(ENV_NO_COLOR_STD, ""); // Any value works for NO_COLOR standard
@@ -1242,6 +1265,7 @@ pretty = true
 
     #[test]
     fn env_verbose_override() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         set_env(ENV_VERBOSE, "true");
 
@@ -1256,6 +1280,7 @@ pretty = true
 
     #[test]
     fn env_pretty_override() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         set_env(ENV_PRETTY, "yes");
 
@@ -1270,6 +1295,7 @@ pretty = true
 
     #[test]
     fn cli_json_flag_overrides_env() {
+        let _guard = env_lock().lock().unwrap();
         remove_env(ENV_CONFIG);
         set_env(ENV_FORMAT, "md");
 
@@ -1287,6 +1313,7 @@ pretty = true
 
     #[test]
     fn env_format_has_priority_over_default_cli_format() {
+        let _guard = env_lock().lock().unwrap();
         // Note: When CLI format is default (Human), env var takes precedence
         // This is because clap's default_value means we can't distinguish
         // "user explicitly passed --format human" from "default value"
@@ -1521,6 +1548,7 @@ timeout_seconds = 45
 
     #[test]
     fn caut_config_env_override() {
+        let _guard = env_lock().lock().unwrap();
         // Create a temp config file
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("custom_config.toml");

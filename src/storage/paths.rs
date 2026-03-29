@@ -17,22 +17,32 @@ impl AppPaths {
     /// Create paths for the caut application.
     #[must_use]
     pub fn new() -> Self {
-        ProjectDirs::from("com", "steipete", "caut").map_or_else(
-            || {
-                // Fallback to home directory
-                let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-                Self {
-                    config: home.join(".config/caut"),
-                    cache: home.join(".cache/caut"),
-                    data: home.join(".local/share/caut"),
-                }
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+
+        let default = ProjectDirs::from("com", "steipete", "caut").map_or_else(
+            || Self {
+                config: home.join(".config/caut"),
+                cache: home.join(".cache/caut"),
+                data: home.join(".local/share/caut"),
             },
             |proj_dirs| Self {
                 config: proj_dirs.config_dir().to_path_buf(),
                 cache: proj_dirs.cache_dir().to_path_buf(),
                 data: proj_dirs.data_dir().to_path_buf(),
             },
-        )
+        );
+
+        Self {
+            config: std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .map_or(default.config, |path| path.join("caut")),
+            cache: std::env::var_os("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .map_or(default.cache, |path| path.join("caut")),
+            data: std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .map_or(default.data, |path| path.join("caut")),
+        }
     }
 
     /// Path to token accounts file.
@@ -80,6 +90,12 @@ impl AppPaths {
         self.cache.join("prompt-cache.json")
     }
 
+    /// Path to the resident daemon metadata file.
+    #[must_use]
+    pub fn daemon_metadata_file(&self) -> PathBuf {
+        self.cache.join("resident-daemon.json")
+    }
+
     /// Ensure all directories exist.
     ///
     /// # Errors
@@ -112,22 +128,28 @@ mod dirs {
 mod tests {
     use super::AppPaths;
     use std::path::PathBuf;
+    #[cfg(target_os = "linux")]
     use std::sync::{Mutex, OnceLock};
 
+    #[cfg(target_os = "linux")]
     use crate::test_utils::TestDir;
 
+    #[cfg(target_os = "linux")]
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+    #[cfg(target_os = "linux")]
     fn env_lock() -> &'static Mutex<()> {
         ENV_LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    #[cfg(target_os = "linux")]
     #[allow(unsafe_code)]
     struct EnvGuard {
         key: &'static str,
         prior: Option<String>,
     }
 
+    #[cfg(target_os = "linux")]
     impl EnvGuard {
         #[allow(unsafe_code)]
         fn set(key: &'static str, value: &PathBuf) -> Self {
@@ -138,6 +160,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     impl Drop for EnvGuard {
         #[allow(unsafe_code)]
         fn drop(&mut self) {
@@ -189,6 +212,10 @@ mod tests {
         let prompt_cache = paths.prompt_cache_file();
         assert!(prompt_cache.starts_with(&paths.cache));
         assert!(prompt_cache.ends_with("prompt-cache.json"));
+
+        let daemon_metadata = paths.daemon_metadata_file();
+        assert!(daemon_metadata.starts_with(&paths.cache));
+        assert!(daemon_metadata.ends_with("resident-daemon.json"));
     }
 
     #[cfg(target_os = "macos")]

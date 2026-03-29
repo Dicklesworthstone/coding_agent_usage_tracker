@@ -143,7 +143,7 @@ fn test_migration_idempotence() {
         let count = store
             .count_rows("schema_migrations")
             .expect("count migrations");
-        assert_eq!(count, 2, "Should have exactly 2 migrations after run {i}");
+        assert_eq!(count, 3, "Should have exactly 3 migrations after run {i}");
     }
 }
 

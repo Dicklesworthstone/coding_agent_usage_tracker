@@ -38,6 +38,9 @@ tarpaulin-report.html
 # NTM agent coordination
 .ntm/
 
+# Agent planning artifacts
+.agents/
+
 # Test artifacts
 test-logs/
 test-results.log

@@ -12,7 +12,7 @@ use super::models::{StatusIndicator, StatusPayload};
 use crate::error::{CautError, Result};
 
 /// Default timeout for status fetches.
-const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
+const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Response from statuspage.io API.
 #[derive(Debug, Deserialize)]

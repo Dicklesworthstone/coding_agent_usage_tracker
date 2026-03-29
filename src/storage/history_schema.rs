@@ -110,11 +110,24 @@ fn get_schema_version(conn: &Connection) -> Result<i32> {
 }
 
 fn apply_migration(conn: &mut Connection, migration: &Migration) -> Result<()> {
+    let migration_sql = if migration.sql.contains("PRAGMA journal_mode = WAL;") {
+        conn.execute_batch("PRAGMA journal_mode = WAL;")
+            .map_err(|e| {
+                CautError::Other(anyhow::anyhow!(
+                    "apply migration {} preamble: {e}",
+                    migration.version
+                ))
+            })?;
+        migration.sql.replace("PRAGMA journal_mode = WAL;\n", "")
+    } else {
+        migration.sql.to_string()
+    };
+
     let tx = conn
         .transaction()
         .map_err(|e| CautError::Other(anyhow::anyhow!("begin migration: {e}")))?;
 
-    tx.execute_batch(migration.sql).map_err(|e| {
+    tx.execute_batch(&migration_sql).map_err(|e| {
         CautError::Other(anyhow::anyhow!(
             "apply migration {}: {e}",
             migration.version

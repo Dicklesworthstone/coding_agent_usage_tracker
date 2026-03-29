@@ -222,6 +222,14 @@ fn read_fast<T: DeserializeOwned>(path: &Path) -> Result<T> {
     Ok(data)
 }
 
+/// Read cached data regardless of freshness.
+///
+/// # Errors
+/// Returns an error if the file cannot be read or the JSON content cannot be deserialized.
+pub fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    read_fast(path)
+}
+
 /// Write data to cache atomically.
 /// Uses temp file + rename to prevent corruption.
 ///

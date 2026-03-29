@@ -228,6 +228,42 @@ caut usage --format md
 caut usage --status
 ```
 
+### 5. Keep A Warm Resident Process
+
+```bash
+# Start the resident daemon once
+caut daemon start --provider codex --interval 60
+
+# Read the latest cached snapshot immediately
+caut daemon status --json
+
+# Ask the resident process to refresh in the background
+caut daemon refresh
+
+# Stop the resident daemon cleanly
+caut daemon stop
+```
+
+The resident mode keeps the watch pipeline warm so short-lived callers do not pay the full provider warmup cost every time. It stores daemon metadata in the cache directory and serves the latest in-memory snapshot without blocking on a fresh fetch.
+
+### 6. Run The Resident Daemon Smoke Test
+
+```bash
+# From the repo root
+./scripts/resident_daemon_smoke_test.sh
+
+# Optional: choose a provider and custom timing
+CAUT_SMOKE_TIMEOUT=2 CAUT_SMOKE_INTERVAL=30 ./scripts/resident_daemon_smoke_test.sh claude
+```
+
+Prerequisites:
+
+- Run it from Bash or Git Bash
+- Use a configured provider account for the provider you test
+- Allow the script to wait for the first cached snapshot before it validates status output
+
+The smoke test starts the daemon, waits for the first cached usage snapshot, validates cached JSON output, requests an async refresh, re-checks status, and confirms that shutdown removes the daemon metadata file.
+
 ---
 
 ## Commands
@@ -256,6 +292,33 @@ OPTIONS:
     --timeout <SECONDS>         Per-provider fetch timeout override
     --web-timeout <SECONDS>     Web fetch timeout (default: 30)
 ```
+
+### `caut daemon`
+
+Manage the resident usage daemon for warm watch-mode behavior.
+
+```
+USAGE:
+    caut daemon <start|status|refresh|stop> [OPTIONS]
+
+SUBCOMMANDS:
+    start     Spawn the resident daemon in the background
+    status    Return the latest cached resident snapshot
+    refresh   Trigger an asynchronous resident refresh and return immediately
+    stop      Stop the resident daemon and remove its metadata file
+```
+
+Notes:
+
+- `start` reuses the same provider-selection flags as `caut usage`
+- `status` returns cached data immediately instead of waiting on provider fetches
+- `refresh` is intentionally non-blocking so shell prompts and plugins can call it cheaply
+- daemon metadata lives in the caut cache directory and includes a per-process nonce to avoid stale-port collisions
+
+### Resident Daemon Validation Assets
+
+- Smoke test script: `scripts/resident_daemon_smoke_test.sh`
+- Release artifact validation example: `CAUT_BIN=./target/release/caut.exe ./scripts/resident_daemon_smoke_test.sh`
 
 ### `caut cost`
 

@@ -12,7 +12,7 @@ use crate::error::{CautError, Result};
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Timeout for status page requests.
-pub const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
+pub const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Build a configured HTTP client.
 ///
@@ -42,7 +42,9 @@ pub fn default_client() -> Result<Client> {
 /// Returns error on network failure or JSON parse failure.
 pub async fn fetch_json<T: serde::de::DeserializeOwned>(client: &Client, url: &str) -> Result<T> {
     let response = client.get(url).send().await.map_err(|e| {
-        if e.is_timeout() {
+        if e.is_connect() {
+            CautError::Network(e.to_string())
+        } else if e.is_timeout() {
             CautError::Timeout(DEFAULT_TIMEOUT.as_secs())
         } else {
             CautError::Network(e.to_string())
