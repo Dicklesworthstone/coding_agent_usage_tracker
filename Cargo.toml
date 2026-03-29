@@ -55,7 +55,7 @@ which = "8.0.0"
 # Regex for markup stripping
 regex = "1.12.3"
 futures = "0.3.32"
-rusqlite = "0.38.0"
+rusqlite = { version = "0.38.0", features = ["bundled"] }
 
 # Cryptography for credential hashing
 sha2 = "0.10"
