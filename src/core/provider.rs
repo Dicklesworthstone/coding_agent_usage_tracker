@@ -161,18 +161,18 @@ impl Provider {
     #[must_use]
     pub const fn default_timeout(self) -> Duration {
         match self {
-            // API/OAuth providers can be a bit slower
-            Self::Gemini | Self::VertexAI => Duration::from_secs(30),
+            // Primary providers and API/OAuth: CLI fetch tries multiple
+            // subprocess invocations sequentially (version + JSON probes +
+            // fallbacks), each needing time to spawn. 30s accommodates slow
+            // Windows environments where doctor --help succeeds in ~700ms
+            // but the full fetch pipeline can exceed 10s.
+            Self::Gemini | Self::VertexAI | Self::Claude | Self::Codex => {
+                Duration::from_secs(30)
+            }
             // Local CLIs or lightweight sources
             Self::Cursor | Self::Copilot | Self::Kiro | Self::JetBrainsAI | Self::Amp => {
                 Duration::from_secs(15)
             }
-            // Primary providers: CLI fetch tries multiple subprocess
-            // invocations sequentially (version + JSON probes + fallbacks),
-            // each needing time to spawn. 30s accommodates slow Windows
-            // environments where doctor --help succeeds in ~700ms but
-            // the full fetch pipeline can exceed 10s.
-            Self::Claude | Self::Codex => Duration::from_secs(30),
             // Default for other providers
             _ => Duration::from_secs(20),
         }

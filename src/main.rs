@@ -110,6 +110,10 @@ async fn run(cli: Cli) -> caut::Result<()> {
             let usage_args = args.to_usage_args();
             caut::tui::run_dashboard(&usage_args, args.interval).await
         }
+
+        Some(Commands::Serve(args)) => caut::cli::serve::execute(&args).await,
+
+        Some(Commands::Query(args)) => caut::cli::query::execute(&args, pretty).await,
     }
 }
 
@@ -254,6 +258,8 @@ COMMANDS:
     cost            Show local cost usage
     session         Show session cost attribution
     dashboard       Launch interactive TUI dashboard
+    serve           Start background HTTP server for programmatic queries
+    query           Query a running caut server (prints JSON to stdout)
     history         Manage usage history and retention
     token-accounts  Manage token accounts
     doctor          Diagnose caut setup and provider health
@@ -272,6 +278,13 @@ QUICK START:
 SHELL PROMPT INTEGRATION:
     caut prompt                   # Output for shell prompt (fast, cached)
     caut prompt --install bash    # Generate bash integration snippet
+
+BACKGROUND SERVER (for plugins and scripts):
+    caut serve                    # Start HTTP server on localhost:19485
+    caut serve --port 8080        # Custom port
+    caut query usage              # Query cached usage data (JSON)
+    caut query cost               # Query cost data (JSON)
+    caut query health             # Check server health
 
 ROBOT MODE (for AI agents):
     caut usage --json             # JSON output

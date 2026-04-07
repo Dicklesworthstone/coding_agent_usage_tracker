@@ -47,6 +47,11 @@ atty = "0.2"
 # TUI dashboard
 ratatui = "0.30"
 
+# Background daemon HTTP server (hyper is already a transitive dep via reqwest)
+hyper = { version = "1.8", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+
 # Logging
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }

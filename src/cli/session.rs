@@ -94,17 +94,15 @@ pub struct SessionTotals {
     pub cost_per_hour_usd: Option<f64>,
 }
 
-/// Execute the session command.
+/// Build session output data without rendering.
+///
+/// This is the shared data-building logic used by both `execute` (the CLI
+/// command) and `serve` (the background daemon).
 ///
 /// # Errors
-/// Returns an error if session log discovery fails, log parsing fails for all
-/// sessions, or output serialization fails.
-pub async fn execute(
-    args: &SessionArgs,
-    format: OutputFormat,
-    pretty: bool,
-    no_color: bool,
-) -> Result<()> {
+/// Returns an error if session log discovery fails or log parsing fails
+/// for all sessions.
+pub fn build_session_output(args: &SessionArgs) -> Result<SessionOutput> {
     let finder = SessionLogFinder::new()?;
 
     // Determine time range
@@ -168,14 +166,28 @@ pub async fn execute(
         None
     };
 
-    let output = SessionOutput {
+    Ok(SessionOutput {
         schema_version: "caut.v1",
         generated_at: Utc::now(),
         command: "session",
         sessions,
         totals,
         errors,
-    };
+    })
+}
+
+/// Execute the session command.
+///
+/// # Errors
+/// Returns an error if session log discovery fails, log parsing fails for all
+/// sessions, or output serialization fails.
+pub async fn execute(
+    args: &SessionArgs,
+    format: OutputFormat,
+    pretty: bool,
+    no_color: bool,
+) -> Result<()> {
+    let output = build_session_output(args)?;
 
     // Render output
     match format {

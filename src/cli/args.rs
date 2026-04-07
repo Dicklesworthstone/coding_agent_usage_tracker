@@ -89,6 +89,12 @@ pub enum Commands {
 
     /// Launch interactive TUI dashboard
     Dashboard(DashboardArgs),
+
+    /// Start a background HTTP server for programmatic queries
+    Serve(ServeArgs),
+
+    /// Query a running caut server and print JSON to stdout
+    Query(QueryArgs),
 }
 
 /// History subcommands.
@@ -412,6 +418,82 @@ pub struct SessionArgs {
     /// Maximum number of sessions to show in list mode (default: 10)
     #[arg(long, short = 'n', value_name = "N", default_value = "10")]
     pub limit: usize,
+}
+
+/// Arguments for the `serve` command (background daemon).
+#[derive(Parser, Debug)]
+pub struct ServeArgs {
+    /// Port to listen on (default: 19485)
+    #[arg(long, default_value = "19485")]
+    pub port: u16,
+
+    /// Bind address (default: 127.0.0.1)
+    #[arg(long, default_value = "127.0.0.1")]
+    pub bind: String,
+
+    /// Background refresh interval in seconds (default: 30).
+    /// The server caches usage data and refreshes it at this interval.
+    #[arg(long, default_value = "30")]
+    pub interval: u64,
+
+    /// Provider to query (name, "both", or "all")
+    #[arg(long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// Data source (auto, web, cli, oauth)
+    #[arg(long, value_name = "SOURCE")]
+    pub source: Option<String>,
+
+    /// Write PID file to this path (default: <data_dir>/caut-server.pid)
+    #[arg(long, value_name = "PATH")]
+    pub pid_file: Option<std::path::PathBuf>,
+
+    /// Run in foreground (don't daemonize, default behavior)
+    #[arg(long)]
+    pub foreground: bool,
+}
+
+impl ServeArgs {
+    /// Convert to `UsageArgs` for the fetch pipeline.
+    #[must_use]
+    pub fn to_usage_args(&self) -> UsageArgs {
+        UsageArgs {
+            provider: self.provider.clone(),
+            account: None,
+            account_index: None,
+            all_accounts: false,
+            no_credits: false,
+            status: true,
+            source: self.source.clone(),
+            web: false,
+            timeout: None,
+            web_timeout: None,
+            web_debug_dump_html: false,
+            watch: false,
+            interval: self.interval,
+            tui: false,
+        }
+    }
+}
+
+/// Arguments for the `query` command (client for the background daemon).
+#[derive(Parser, Debug)]
+pub struct QueryArgs {
+    /// Endpoint to query: usage, cost, session, health (default: usage)
+    #[arg(default_value = "usage")]
+    pub endpoint: String,
+
+    /// Port of the running server (default: 19485)
+    #[arg(long, default_value = "19485")]
+    pub port: u16,
+
+    /// Host of the running server (default: 127.0.0.1)
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Connection timeout in seconds
+    #[arg(long, default_value = "5")]
+    pub timeout: u64,
 }
 
 impl DashboardArgs {

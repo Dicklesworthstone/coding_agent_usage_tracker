@@ -5,6 +5,8 @@ pub mod cost;
 pub mod doctor;
 pub mod history;
 pub mod prompt;
+pub mod query;
+pub mod serve;
 pub mod session;
 pub mod usage;
 pub mod watch;
