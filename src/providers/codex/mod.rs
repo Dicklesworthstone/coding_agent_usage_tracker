@@ -71,7 +71,21 @@ fn is_cli_available() -> bool {
 // =============================================================================
 
 /// Get the Codex config directory path.
+///
+/// Resolution order (first match wins):
+/// 1. `CODEX_HOME` environment variable — the same knob `OpenAI`'s Codex CLI
+///    uses to relocate its config, so honoring it lets users run side-by-side
+///    accounts with separate config directories.
+/// 2. `~/.codex` — the documented default location.
+///
+/// See issue #6.
 fn get_codex_dir() -> Option<PathBuf> {
+    if let Ok(env_dir) = std::env::var("CODEX_HOME") {
+        let trimmed = env_dir.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
     directories::BaseDirs::new().map(|d| d.home_dir().join(".codex"))
 }
 
@@ -1264,5 +1278,55 @@ mod tests {
     fn source_labels_are_correct() {
         assert_eq!(SOURCE_WEB, "openai-web");
         assert_eq!(SOURCE_CLI, "codex-cli");
+    }
+
+    // =========================================================================
+    // CODEX_HOME env var tests (issue #6)
+    // =========================================================================
+
+    static CODEX_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn get_codex_dir_honors_codex_home_env() {
+        let _guard = CODEX_HOME_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let original = std::env::var("CODEX_HOME").ok();
+        // SAFETY: tests are serialized by CODEX_HOME_LOCK.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("CODEX_HOME", "/tmp/codex-alt-account");
+        }
+
+        let dir = get_codex_dir();
+        assert_eq!(dir, Some(PathBuf::from("/tmp/codex-alt-account")));
+
+        #[allow(unsafe_code)]
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var("CODEX_HOME", v),
+                None => std::env::remove_var("CODEX_HOME"),
+            }
+        }
+    }
+
+    #[test]
+    fn get_codex_dir_ignores_empty_env_and_falls_back_to_default() {
+        let _guard = CODEX_HOME_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let original = std::env::var("CODEX_HOME").ok();
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("CODEX_HOME", "");
+        }
+
+        let dir = get_codex_dir();
+        let expected = directories::BaseDirs::new().map(|d| d.home_dir().join(".codex"));
+        assert_eq!(dir, expected);
+
+        #[allow(unsafe_code)]
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var("CODEX_HOME", v),
+                None => std::env::remove_var("CODEX_HOME"),
+            }
+        }
     }
 }

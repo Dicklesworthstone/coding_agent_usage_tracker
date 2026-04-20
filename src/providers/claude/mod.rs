@@ -97,14 +97,60 @@ fn get_oauth_token() -> Option<String> {
 // =============================================================================
 
 /// Get the Claude config directory path.
+///
+/// Resolution order (first match wins):
+/// 1. `CLAUDE_CONFIG_DIR` environment variable — the same knob Anthropic's
+///    Claude Code CLI uses to relocate its config, so honoring it lets users
+///    run side-by-side accounts with separate config directories.
+/// 2. `~/.claude` — the documented default.
+///
+/// See issue #6.
 fn get_claude_dir() -> Option<PathBuf> {
+    if let Ok(env_dir) = std::env::var("CLAUDE_CONFIG_DIR") {
+        let trimmed = env_dir.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
     directories::BaseDirs::new().map(|d| d.home_dir().join(".claude"))
 }
 
 /// Check if Claude is configured locally.
+///
+/// Considers:
+/// - A `.credentials.json` or `settings.json` under the resolved Claude dir.
+/// - On macOS, the system Keychain entry Claude Code writes on OAuth login
+///   (service `Claude Code-credentials`). The Claude Code CLI on macOS
+///   stores OAuth credentials in the Keychain, not in `.credentials.json`,
+///   so a file-only probe reports the user as unauthenticated even when the
+///   CLI itself is fully logged in. See issue #6.
 fn has_local_config() -> bool {
-    get_claude_dir()
+    if get_claude_dir()
         .is_some_and(|d| d.join(".credentials.json").exists() || d.join("settings.json").exists())
+    {
+        return true;
+    }
+    macos_keychain_has_claude_credentials()
+}
+
+/// On macOS, look up the Claude Code keychain entry. Returns false on other
+/// platforms and on lookup failure.
+#[cfg(target_os = "macos")]
+fn macos_keychain_has_claude_credentials() -> bool {
+    // Prefer the current-user keychain; fall back to the generic entry.
+    let user = std::env::var("USER").ok();
+    let try_entry = |account: &str| -> bool {
+        keyring::Entry::new("Claude Code-credentials", account)
+            .ok()
+            .and_then(|e| e.get_password().ok())
+            .is_some_and(|s| !s.is_empty())
+    };
+    user.as_deref().is_some_and(try_entry) || try_entry("")
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn macos_keychain_has_claude_credentials() -> bool {
+    false
 }
 
 /// Credentials.json structure from ~/.claude/.credentials.json
@@ -909,5 +955,60 @@ Plan: Pro
         assert_eq!(SOURCE_OAUTH, "oauth");
         assert_eq!(SOURCE_WEB, "web");
         assert_eq!(SOURCE_CLI, "claude");
+    }
+
+    // =========================================================================
+    // CLAUDE_CONFIG_DIR env var tests (issue #6)
+    // =========================================================================
+
+    /// Serializes tests that mutate `CLAUDE_CONFIG_DIR` to avoid interleaving.
+    /// Other tests in this module do not touch this env var, so the lock
+    /// only needs to cover the writers here.
+    static CLAUDE_CONFIG_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn get_claude_dir_honors_claude_config_dir_env() {
+        let _guard = CLAUDE_CONFIG_DIR_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let original = std::env::var("CLAUDE_CONFIG_DIR").ok();
+        // SAFETY: tests are serialized by CLAUDE_CONFIG_DIR_LOCK.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("CLAUDE_CONFIG_DIR", "/tmp/claude-alt-account");
+        }
+
+        let dir = get_claude_dir();
+        assert_eq!(dir, Some(PathBuf::from("/tmp/claude-alt-account")));
+
+        #[allow(unsafe_code)]
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+                None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+            }
+        }
+    }
+
+    #[test]
+    fn get_claude_dir_ignores_empty_env_and_falls_back_to_default() {
+        let _guard = CLAUDE_CONFIG_DIR_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let original = std::env::var("CLAUDE_CONFIG_DIR").ok();
+        // Empty strings (common when shells set but blank) must not shadow
+        // the ~/.claude default.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("CLAUDE_CONFIG_DIR", "   ");
+        }
+
+        let dir = get_claude_dir();
+        let expected = directories::BaseDirs::new().map(|d| d.home_dir().join(".claude"));
+        assert_eq!(dir, expected);
+
+        #[allow(unsafe_code)]
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+                None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+            }
+        }
     }
 }
