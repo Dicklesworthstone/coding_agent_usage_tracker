@@ -966,49 +966,64 @@ Plan: Pro
     /// only needs to cover the writers here.
     static CLAUDE_CONFIG_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    #[test]
-    fn get_claude_dir_honors_claude_config_dir_env() {
-        let _guard = CLAUDE_CONFIG_DIR_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let original = std::env::var("CLAUDE_CONFIG_DIR").ok();
-        // SAFETY: tests are serialized by CLAUDE_CONFIG_DIR_LOCK.
-        #[allow(unsafe_code)]
-        unsafe {
-            std::env::set_var("CLAUDE_CONFIG_DIR", "/tmp/claude-alt-account");
+    /// Sets an env var for the duration of its scope and restores the
+    /// previous value (or removes if there was none) on Drop. Ensures the
+    /// env var is restored even if the test panics on an assertion, so
+    /// one failing test cannot leak state into another.
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: all call sites in this module hold CLAUDE_CONFIG_DIR_LOCK
+            // for the duration of the guard, so no other test is racing on the
+            // same env var.
+            #[allow(unsafe_code)]
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, original }
         }
+    }
 
-        let dir = get_claude_dir();
-        assert_eq!(dir, Some(PathBuf::from("/tmp/claude-alt-account")));
-
-        #[allow(unsafe_code)]
-        unsafe {
-            match original {
-                Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
-                None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            #[allow(unsafe_code)]
+            unsafe {
+                match self.original.take() {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
             }
         }
     }
 
     #[test]
+    fn get_claude_dir_honors_claude_config_dir_env() {
+        let _lock = CLAUDE_CONFIG_DIR_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _env = EnvVarGuard::set("CLAUDE_CONFIG_DIR", "/tmp/claude-alt-account");
+
+        assert_eq!(
+            get_claude_dir(),
+            Some(PathBuf::from("/tmp/claude-alt-account"))
+        );
+    }
+
+    #[test]
     fn get_claude_dir_ignores_empty_env_and_falls_back_to_default() {
-        let _guard = CLAUDE_CONFIG_DIR_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let original = std::env::var("CLAUDE_CONFIG_DIR").ok();
-        // Empty strings (common when shells set but blank) must not shadow
-        // the ~/.claude default.
-        #[allow(unsafe_code)]
-        unsafe {
-            std::env::set_var("CLAUDE_CONFIG_DIR", "   ");
-        }
+        let _lock = CLAUDE_CONFIG_DIR_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Empty / whitespace-only strings (common when shells set but blank)
+        // must not shadow the ~/.claude default.
+        let _env = EnvVarGuard::set("CLAUDE_CONFIG_DIR", "   ");
 
-        let dir = get_claude_dir();
         let expected = directories::BaseDirs::new().map(|d| d.home_dir().join(".claude"));
-        assert_eq!(dir, expected);
-
-        #[allow(unsafe_code)]
-        unsafe {
-            match original {
-                Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
-                None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
-            }
-        }
+        assert_eq!(get_claude_dir(), expected);
     }
 }

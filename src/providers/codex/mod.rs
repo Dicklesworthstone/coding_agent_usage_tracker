@@ -1286,47 +1286,61 @@ mod tests {
 
     static CODEX_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    #[test]
-    fn get_codex_dir_honors_codex_home_env() {
-        let _guard = CODEX_HOME_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let original = std::env::var("CODEX_HOME").ok();
-        // SAFETY: tests are serialized by CODEX_HOME_LOCK.
-        #[allow(unsafe_code)]
-        unsafe {
-            std::env::set_var("CODEX_HOME", "/tmp/codex-alt-account");
+    /// Sets an env var for the duration of its scope and restores the
+    /// previous value (or removes if there was none) on Drop. Guards
+    /// against test-panic env-var leakage.
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: all call sites in this module hold CODEX_HOME_LOCK for
+            // the duration of the guard, so no other test is racing on the
+            // same env var.
+            #[allow(unsafe_code)]
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, original }
         }
+    }
 
-        let dir = get_codex_dir();
-        assert_eq!(dir, Some(PathBuf::from("/tmp/codex-alt-account")));
-
-        #[allow(unsafe_code)]
-        unsafe {
-            match original {
-                Some(v) => std::env::set_var("CODEX_HOME", v),
-                None => std::env::remove_var("CODEX_HOME"),
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            #[allow(unsafe_code)]
+            unsafe {
+                match self.original.take() {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
             }
         }
     }
 
     #[test]
+    fn get_codex_dir_honors_codex_home_env() {
+        let _lock = CODEX_HOME_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _env = EnvVarGuard::set("CODEX_HOME", "/tmp/codex-alt-account");
+
+        assert_eq!(
+            get_codex_dir(),
+            Some(PathBuf::from("/tmp/codex-alt-account"))
+        );
+    }
+
+    #[test]
     fn get_codex_dir_ignores_empty_env_and_falls_back_to_default() {
-        let _guard = CODEX_HOME_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let original = std::env::var("CODEX_HOME").ok();
-        #[allow(unsafe_code)]
-        unsafe {
-            std::env::set_var("CODEX_HOME", "");
-        }
+        let _lock = CODEX_HOME_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _env = EnvVarGuard::set("CODEX_HOME", "");
 
-        let dir = get_codex_dir();
         let expected = directories::BaseDirs::new().map(|d| d.home_dir().join(".codex"));
-        assert_eq!(dir, expected);
-
-        #[allow(unsafe_code)]
-        unsafe {
-            match original {
-                Some(v) => std::env::set_var("CODEX_HOME", v),
-                None => std::env::remove_var("CODEX_HOME"),
-            }
-        }
+        assert_eq!(get_codex_dir(), expected);
     }
 }
