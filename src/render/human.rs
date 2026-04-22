@@ -87,6 +87,28 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
         ));
     }
 
+    // When no rate-limit windows are available but we DO have other info
+    // (identity, credits, status), say so explicitly — otherwise the block
+    // renders with no mention of the missing rate data. The modern Claude
+    // and Codex CLIs don't expose rate-limit info via script-accessible
+    // commands on Linux, so CLI strategies can only populate identity
+    // (see #7). The truly-empty case ("No usage data available") is still
+    // handled by the fallback below.
+    let has_any_rate_window = payload.usage.primary.is_some()
+        || payload.usage.secondary.is_some()
+        || payload.usage.tertiary.is_some();
+    let has_any_ancillary = payload.credits.is_some()
+        || payload.usage.identity.is_some()
+        || payload.status.is_some();
+    if !has_any_rate_window && has_any_ancillary {
+        content_lines.insert(
+            0,
+            vec![Segment::plain(
+                "Rate limits: not available via this source (identity only)".to_string(),
+            )],
+        );
+    }
+
     // Credits
     if let Some(credits) = &payload.credits {
         content_lines.push(vec![Segment::plain(format!(

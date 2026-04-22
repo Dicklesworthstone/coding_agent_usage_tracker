@@ -70,12 +70,25 @@ pub async fn fetch_provider(provider: Provider, mode: SourceMode) -> FetchOutcom
 
         match result {
             Ok(snapshot) => {
-                tracing::info!(
-                    provider = %provider.cli_name(),
-                    strategy = strategy.id,
-                    duration_ms,
-                    "Fetch succeeded"
-                );
+                // Differentiate "fetched rate-limit data" from "fetched identity
+                // only" so users understand why `primary`/`secondary` may be null
+                // on platforms where the CLI doesn't expose quota (see #7).
+                let has_quota = snapshot.primary.is_some() || snapshot.secondary.is_some();
+                if has_quota {
+                    tracing::info!(
+                        provider = %provider.cli_name(),
+                        strategy = strategy.id,
+                        duration_ms,
+                        "Fetch succeeded (rate-limit data populated)"
+                    );
+                } else {
+                    tracing::info!(
+                        provider = %provider.cli_name(),
+                        strategy = strategy.id,
+                        duration_ms,
+                        "Fetch completed (identity only — no rate-limit data available from this strategy)"
+                    );
+                }
                 return FetchOutcome::success(
                     provider,
                     snapshot,
