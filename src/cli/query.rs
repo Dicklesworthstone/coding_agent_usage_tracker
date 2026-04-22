@@ -42,9 +42,10 @@ pub async fn execute(args: &QueryArgs, pretty: bool) -> Result<()> {
     })?;
 
     let status = response.status();
-    let body = response.text().await.map_err(|e| {
-        CautError::Config(format!("Failed to read response body: {e}"))
-    })?;
+    let body = response
+        .text()
+        .await
+        .map_err(|e| CautError::Config(format!("Failed to read response body: {e}")))?;
 
     if !status.is_success() {
         return Err(CautError::Config(format!(
@@ -55,8 +56,7 @@ pub async fn execute(args: &QueryArgs, pretty: bool) -> Result<()> {
     // Pretty-print if requested
     if pretty {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
-            let pretty_json = serde_json::to_string_pretty(&value)
-                .unwrap_or(body);
+            let pretty_json = serde_json::to_string_pretty(&value).unwrap_or(body);
             println!("{pretty_json}");
         } else {
             println!("{body}");

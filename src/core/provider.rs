@@ -166,9 +166,7 @@ impl Provider {
             // fallbacks), each needing time to spawn. 30s accommodates slow
             // Windows environments where doctor --help succeeds in ~700ms
             // but the full fetch pipeline can exceed 10s.
-            Self::Gemini | Self::VertexAI | Self::Claude | Self::Codex => {
-                Duration::from_secs(30)
-            }
+            Self::Gemini | Self::VertexAI | Self::Claude | Self::Codex => Duration::from_secs(30),
             // Local CLIs or lightweight sources
             Self::Cursor | Self::Copilot | Self::Kiro | Self::JetBrainsAI | Self::Amp => {
                 Duration::from_secs(15)

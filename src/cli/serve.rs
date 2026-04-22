@@ -83,7 +83,6 @@ fn write_server_info(args: &ServeArgs, paths: &AppPaths) -> Result<()> {
     Ok(())
 }
 
-
 /// Handle an incoming HTTP request.
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
@@ -169,7 +168,8 @@ async fn handle_request(
 
 /// Build a JSON HTTP response.
 fn json_response<T: Serialize>(status: StatusCode, body: &T) -> Response<Full<Bytes>> {
-    let json = serde_json::to_string(body).unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.to_string());
+    let json = serde_json::to_string(body)
+        .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.to_string());
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json")
@@ -229,10 +229,7 @@ async fn fetch_session_data() -> Result<String> {
 }
 
 /// Perform the initial usage fetch and populate the shared state.
-async fn initial_fetch(
-    usage_args: &crate::cli::args::UsageArgs,
-    state: &Arc<RwLock<ServerState>>,
-) {
+async fn initial_fetch(usage_args: &crate::cli::args::UsageArgs, state: &Arc<RwLock<ServerState>>) {
     tracing::info!("Performing initial usage fetch...");
     match fetch_usage(usage_args).await {
         Ok(results) => {
@@ -372,7 +369,11 @@ pub async fn execute(args: &ServeArgs) -> Result<()> {
     let usage_args = args.to_usage_args();
 
     initial_fetch(&usage_args, &state).await;
-    spawn_refresh_task(Arc::clone(&state), Duration::from_secs(args.interval), usage_args);
+    spawn_refresh_task(
+        Arc::clone(&state),
+        Duration::from_secs(args.interval),
+        usage_args,
+    );
     let shutdown_rx = spawn_shutdown_handler(args.pid_file.clone(), paths);
 
     accept_loop(listener, state, started_at, shutdown_rx).await;

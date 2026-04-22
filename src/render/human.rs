@@ -97,9 +97,8 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
     let has_any_rate_window = payload.usage.primary.is_some()
         || payload.usage.secondary.is_some()
         || payload.usage.tertiary.is_some();
-    let has_any_ancillary = payload.credits.is_some()
-        || payload.usage.identity.is_some()
-        || payload.status.is_some();
+    let has_any_ancillary =
+        payload.credits.is_some() || payload.usage.identity.is_some() || payload.status.is_some();
     if !has_any_rate_window && has_any_ancillary {
         content_lines.insert(
             0,
