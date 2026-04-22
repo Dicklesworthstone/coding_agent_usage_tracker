@@ -111,23 +111,33 @@ mod dirs {
 #[cfg(test)]
 mod tests {
     use super::AppPaths;
+    #[cfg(target_os = "linux")]
     use std::path::PathBuf;
+    #[cfg(target_os = "linux")]
     use std::sync::{Mutex, OnceLock};
 
+    #[cfg(target_os = "linux")]
     use crate::test_utils::TestDir;
 
+    // The env-mutation harness (ENV_LOCK, env_lock, EnvGuard) is only used by
+    // the two Linux-only XDG-override tests below. Gating the harness on the
+    // same cfg keeps macOS/Windows builds warning-clean under `-D warnings`.
+    #[cfg(target_os = "linux")]
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+    #[cfg(target_os = "linux")]
     fn env_lock() -> &'static Mutex<()> {
         ENV_LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    #[cfg(target_os = "linux")]
     #[allow(unsafe_code)]
     struct EnvGuard {
         key: &'static str,
         prior: Option<String>,
     }
 
+    #[cfg(target_os = "linux")]
     impl EnvGuard {
         #[allow(unsafe_code)]
         fn set(key: &'static str, value: &PathBuf) -> Self {
@@ -138,6 +148,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     impl Drop for EnvGuard {
         #[allow(unsafe_code)]
         fn drop(&mut self) {
