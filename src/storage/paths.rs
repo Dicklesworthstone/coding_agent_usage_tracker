@@ -111,7 +111,6 @@ mod dirs {
 #[cfg(test)]
 mod tests {
     use super::AppPaths;
-    #[cfg(target_os = "linux")]
     use std::path::PathBuf;
     #[cfg(target_os = "linux")]
     use std::sync::{Mutex, OnceLock};
