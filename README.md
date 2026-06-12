@@ -19,7 +19,7 @@
 
 ```bash
 # From source (recommended)
-cargo install --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
+cargo install --locked --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
 
 # Then run
 caut usage
@@ -158,13 +158,13 @@ A faithful port of [CodexBar](https://github.com/steipete/codexbar)'s CLI functi
 ```bash
 git clone https://github.com/Dicklesworthstone/coding_agent_usage_tracker
 cd coding_agent_usage_tracker
-cargo install --path .
+cargo install --locked --path .
 ```
 
 ### From Git
 
 ```bash
-cargo install --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
+cargo install --locked --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
 ```
 
 ### Requirements

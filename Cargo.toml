@@ -33,6 +33,13 @@ reqwest = { version = "0.13.2", features = ["json"] }
 
 # Date/time
 chrono = { version = "0.4.43", features = ["serde"] }
+# Transitive-dep pin: time 0.3.48's `modifier!` macro generates
+# `impl From<$name> for <$name as ModifierValue>::Type` (an associated-type
+# projection), which breaks trait coherence (E0119) for blanket `From` impls in
+# rich_rust and ratatui-widgets, so unlocked `cargo install` resolutions fail
+# to compile. See https://github.com/time-rs/time/issues/785.
+# Remove this pin once a fixed `time` release ships (or 0.3.48 is yanked).
+time = "=0.3.47"
 
 # Platform paths and secrets
 directories = "6.0.0"
