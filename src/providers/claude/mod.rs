@@ -1,7 +1,8 @@
 //! Claude (Anthropic) provider implementation.
 //!
 //! Supports:
-//! - OAuth API (with stored token)
+//! - OAuth API (token from the keyring, Claude Code's `.credentials.json`,
+//!   or the macOS Keychain)
 //! - Web scraping (macOS only)
 //! - CLI local config reading
 //! - CLI PTY
@@ -50,8 +51,8 @@ pub fn fetch_plan() -> FetchPlan {
                 id: "claude-oauth",
                 kind: FetchKind::OAuth,
                 is_available: || {
-                    // OAuth requires stored token
-                    // Check keyring for token
+                    // OAuth requires a token from the keyring, Claude Code's
+                    // credentials file, or the macOS Keychain.
                     has_oauth_token()
                 },
                 should_fallback: |_| true,
@@ -80,16 +81,64 @@ fn is_cli_available() -> bool {
     which::which(CLI_NAME).is_ok()
 }
 
-/// Check if OAuth token is available.
+/// Check if an OAuth token is available from any supported source.
 fn has_oauth_token() -> bool {
-    // Try to get token from keyring
     get_oauth_token().is_some()
 }
 
-/// Get OAuth token from keyring.
-fn get_oauth_token() -> Option<String> {
+/// Get an OAuth access token for the Anthropic API.
+///
+/// Tries, in order:
+/// 1. The system keyring entry (`caut` / `claude-oauth-token`).
+/// 2. Claude Code's credentials file (`<claude_dir>/.credentials.json`, key
+///    `claudeAiOauth.accessToken`) — `<claude_dir>` honors `CLAUDE_CONFIG_DIR`
+///    via [`get_claude_dir`].
+/// 3. On macOS, the `Claude Code-credentials` Keychain entry (which holds the
+///    same JSON payload as the credentials file).
+///
+/// Tokens whose `claudeAiOauth.expiresAt` (epoch milliseconds) is in the past
+/// are skipped. See issue #8.
+pub(crate) fn get_oauth_token() -> Option<String> {
+    get_keyring_token()
+        .or_else(get_credentials_file_token)
+        .or_else(get_macos_keychain_token)
+}
+
+/// Get OAuth token from the caut keyring entry.
+fn get_keyring_token() -> Option<String> {
     let entry = keyring::Entry::new("caut", "claude-oauth-token").ok()?;
-    entry.get_password().ok()
+    entry.get_password().ok().filter(|t| !t.is_empty())
+}
+
+/// Get OAuth token from Claude Code's `.credentials.json`.
+fn get_credentials_file_token() -> Option<String> {
+    let creds_path = get_claude_dir()?.join(".credentials.json");
+    let content = fs::read_to_string(creds_path).ok()?;
+    token_from_credentials_json(&content)
+}
+
+/// On macOS, extract an OAuth token from the `Claude Code-credentials`
+/// Keychain entry, which stores the same JSON payload that Linux/Windows
+/// installs write to `.credentials.json`.
+#[cfg(target_os = "macos")]
+fn get_macos_keychain_token() -> Option<String> {
+    let user = std::env::var("USER").ok();
+    let try_entry = |account: &str| -> Option<String> {
+        keyring::Entry::new("Claude Code-credentials", account)
+            .ok()?
+            .get_password()
+            .ok()
+    };
+    let payload = user
+        .as_deref()
+        .and_then(try_entry)
+        .or_else(|| try_entry(""))?;
+    token_from_credentials_json(&payload)
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn get_macos_keychain_token() -> Option<String> {
+    None
 }
 
 // =============================================================================
@@ -153,45 +202,109 @@ const fn macos_keychain_has_claude_credentials() -> bool {
     false
 }
 
-/// Credentials.json structure from ~/.claude/.credentials.json
+/// Shape of Claude Code's `.credentials.json` (and the macOS Keychain
+/// payload): OAuth tokens live under a top-level `claudeAiOauth` object
+/// (alongside `mcpOAuth`). This matches what the doctor's auth check parses
+/// in `src/core/doctor/checks.rs`. See issue #8.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ClaudeCredentials {
+struct ClaudeCredentialsFile {
     #[serde(default)]
-    credentials: Option<ClaudeCredentialData>,
+    claude_ai_oauth: Option<ClaudeOauthCredentials>,
 }
 
+/// The `claudeAiOauth` object inside the credentials payload.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ClaudeCredentialData {
+struct ClaudeOauthCredentials {
     #[serde(default)]
-    email: Option<String>,
+    access_token: Option<String>,
+    /// Token expiry as epoch milliseconds.
     #[serde(default)]
-    account_uuid: Option<String>,
+    expires_at: Option<i64>,
 }
 
-/// Read credentials from local ~/.claude/.credentials.json
-fn read_local_credentials() -> Option<ClaudeCredentials> {
-    let claude_dir = get_claude_dir()?;
-    let creds_path = claude_dir.join(".credentials.json");
-
-    if !creds_path.exists() {
-        tracing::debug!("Claude credentials not found at {:?}", creds_path);
+/// Extract a non-expired access token from a credentials JSON payload
+/// (`claudeAiOauth.accessToken`, honoring `claudeAiOauth.expiresAt`).
+fn token_from_credentials_json(content: &str) -> Option<String> {
+    let creds: ClaudeCredentialsFile = serde_json::from_str(content).ok()?;
+    let oauth = creds.claude_ai_oauth?;
+    let token = oauth.access_token.filter(|t| !t.is_empty())?;
+    if let Some(expires_at_ms) = oauth.expires_at
+        && expires_at_ms <= Utc::now().timestamp_millis()
+    {
+        tracing::debug!("Claude OAuth token is expired (expiresAt in the past), skipping");
         return None;
     }
-
-    let content = fs::read_to_string(&creds_path).ok()?;
-    serde_json::from_str(&content).ok()
+    Some(token)
 }
 
-/// Get identity information from local credentials.
-fn get_local_identity() -> Option<ProviderIdentity> {
-    let creds = read_local_credentials()?;
-    let data = creds.credentials?;
+/// Shape of Claude Code's main config (`~/.claude.json`): account identity
+/// lives under the top-level `oauthAccount` object.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeMainConfig {
+    #[serde(default)]
+    oauth_account: Option<ClaudeOauthAccount>,
+}
 
+/// The `oauthAccount` object inside Claude Code's main config.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeOauthAccount {
+    #[serde(default)]
+    email_address: Option<String>,
+    #[serde(default)]
+    organization_name: Option<String>,
+}
+
+/// Parse the `oauthAccount` identity object out of main-config JSON.
+fn oauth_account_from_json(content: &str) -> Option<ClaudeOauthAccount> {
+    serde_json::from_str::<ClaudeMainConfig>(content)
+        .ok()?
+        .oauth_account
+}
+
+/// Read the `oauthAccount` identity from Claude Code's main config.
+///
+/// Checks `<claude_dir>/.claude.json` first (where Claude Code writes it when
+/// `CLAUDE_CONFIG_DIR` relocates the config), then the documented default
+/// `~/.claude.json`.
+fn read_oauth_account() -> Option<ClaudeOauthAccount> {
+    let mut candidates = Vec::new();
+    if let Some(dir) = get_claude_dir() {
+        candidates.push(dir.join(".claude.json"));
+    }
+    if let Some(base) = directories::BaseDirs::new() {
+        candidates.push(base.home_dir().join(".claude.json"));
+    }
+    for path in candidates {
+        if let Ok(content) = fs::read_to_string(&path)
+            && let Some(account) = oauth_account_from_json(&content)
+        {
+            return Some(account);
+        }
+    }
+    None
+}
+
+/// Build a [`ProviderIdentity`] from the local `oauthAccount` config with the
+/// given login method. Email/org are `None` when no account info is found.
+fn local_identity_with_method(method: &str) -> ProviderIdentity {
+    let account = read_oauth_account();
+    ProviderIdentity {
+        account_email: account.as_ref().and_then(|a| a.email_address.clone()),
+        account_organization: account.and_then(|a| a.organization_name),
+        login_method: Some(method.to_string()),
+    }
+}
+
+/// Get identity information from local Claude Code config.
+fn get_local_identity() -> Option<ProviderIdentity> {
+    let account = read_oauth_account()?;
     Some(ProviderIdentity {
-        account_email: data.email,
-        account_organization: data.account_uuid,
+        account_email: account.email_address,
+        account_organization: account.organization_name,
         login_method: Some("cli-local".to_string()),
     })
 }
@@ -200,63 +313,45 @@ fn get_local_identity() -> Option<ProviderIdentity> {
 // API Response Types
 // =============================================================================
 
-/// Response from Anthropic rate limit API.
+/// Response from the Anthropic OAuth usage endpoint
+/// (`GET {API_BASE}/api/oauth/usage`) — the same endpoint the Claude Code
+/// CLI's `/usage` screen queries. See issue #8.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct ClaudeRateLimitResponse {
+struct ClaudeOauthUsageResponse {
     #[serde(default)]
-    rate_limit: Option<ClaudeRateLimit>,
-    #[allow(dead_code)]
+    five_hour: Option<ClaudeUsageWindow>,
     #[serde(default)]
-    usage: Option<ClaudeUsage>,
+    seven_day: Option<ClaudeUsageWindow>,
     #[serde(default)]
-    account: Option<ClaudeAccount>,
+    seven_day_opus: Option<ClaudeUsageWindow>,
+    #[serde(default)]
+    seven_day_sonnet: Option<ClaudeUsageWindow>,
 }
 
+/// A single usage window from the OAuth usage endpoint.
+///
+/// `utilization` is already percent-scale (e.g. `18.0` means 18% used);
+/// `resets_at` is an RFC 3339 timestamp.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct ClaudeRateLimit {
+struct ClaudeUsageWindow {
     #[serde(default)]
-    requests_remaining: Option<i64>,
-    #[serde(default)]
-    requests_limit: Option<i64>,
-    #[serde(default)]
-    tokens_remaining: Option<i64>,
-    #[serde(default)]
-    tokens_limit: Option<i64>,
+    utilization: Option<f64>,
     #[serde(default)]
     resets_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-struct ClaudeUsage {
-    #[serde(default)]
-    input_tokens: Option<i64>,
-    #[serde(default)]
-    output_tokens: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-struct ClaudeAccount {
-    #[serde(default)]
-    email: Option<String>,
-    #[serde(default)]
-    organization: Option<String>,
-    #[serde(default)]
-    plan: Option<String>,
 }
 
 // =============================================================================
 // Fetch Implementations
 // =============================================================================
 
-/// Fetch usage via OAuth API.
+/// Fetch usage via the Anthropic OAuth usage endpoint.
 ///
-/// Requires a valid OAuth token stored in the system keyring.
+/// Sends `GET {API_BASE}/api/oauth/usage` with `Authorization: Bearer <token>`
+/// and the `anthropic-beta: oauth-2025-04-20` header. The token comes from
+/// [`get_oauth_token`] (keyring, Claude Code's credentials file, or the macOS
+/// Keychain).
 ///
 /// # Errors
 /// Returns an error if the HTTP client cannot be built, the request times out,
@@ -264,14 +359,12 @@ struct ClaudeAccount {
 pub async fn fetch_oauth(token: &str) -> Result<UsageSnapshot> {
     let client = build_client(DEFAULT_TIMEOUT)?;
 
-    // Make authenticated request to rate limit endpoint
-    let url = format!("{API_BASE}/v1/rate_limits");
+    let url = format!("{API_BASE}/api/oauth/usage");
 
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {token}"))
-        .header("anthropic-version", "2023-06-01")
-        .header("x-api-key", token)
+        .header("anthropic-beta", "oauth-2025-04-20")
         .send()
         .await
         .map_err(|e| {
@@ -289,12 +382,12 @@ pub async fn fetch_oauth(token: &str) -> Result<UsageSnapshot> {
         });
     }
 
-    let data: ClaudeRateLimitResponse = response
+    let data: ClaudeOauthUsageResponse = response
         .json()
         .await
         .map_err(|e| CautError::ParseResponse(e.to_string()))?;
 
-    Ok(parse_api_response(&data))
+    Ok(parse_oauth_usage_response(&data))
 }
 
 /// Fetch usage via web scraping.
@@ -349,7 +442,13 @@ pub async fn fetch_cli() -> Result<UsageSnapshot> {
 
     // Try to get rate limit info via JSON output (unlikely to work - Claude CLI doesn't expose this)
     if let Ok(response) = try_json_rate_limit().await {
-        return Ok(parse_api_response(&response));
+        let snapshot = parse_oauth_usage_response(&response);
+        // Only accept the parsed output if it actually carried quota data;
+        // an unrelated-but-valid JSON object deserializes to all-None fields.
+        if snapshot.primary.is_some() || snapshot.secondary.is_some() || snapshot.tertiary.is_some()
+        {
+            return Ok(snapshot);
+        }
     }
 
     // Try the /limits subcommand if available
@@ -385,7 +484,7 @@ pub async fn fetch_cli() -> Result<UsageSnapshot> {
 }
 
 /// Try to get rate limit via JSON output.
-async fn try_json_rate_limit() -> Result<ClaudeRateLimitResponse> {
+async fn try_json_rate_limit() -> Result<ClaudeOauthUsageResponse> {
     // Try various command patterns that CLI tools commonly use
     let commands = [
         &["rate-limit", "--json"][..],
@@ -395,7 +494,7 @@ async fn try_json_rate_limit() -> Result<ClaudeRateLimitResponse> {
 
     for args in commands {
         if let Ok(response) =
-            run_json_command::<ClaudeRateLimitResponse>(CLI_NAME, args, CLI_TIMEOUT).await
+            run_json_command::<ClaudeOauthUsageResponse>(CLI_NAME, args, CLI_TIMEOUT).await
         {
             return Ok(response);
         }
@@ -407,58 +506,56 @@ async fn try_json_rate_limit() -> Result<ClaudeRateLimitResponse> {
     })
 }
 
-/// Parse API response into `UsageSnapshot`.
-#[allow(clippy::cast_precision_loss)] // rate limit values fit in f64
-fn parse_api_response(response: &ClaudeRateLimitResponse) -> UsageSnapshot {
+/// Minutes in the 5-hour session window.
+const FIVE_HOUR_WINDOW_MINUTES: i32 = 5 * 60;
+
+/// Minutes in the 7-day window.
+const SEVEN_DAY_WINDOW_MINUTES: i32 = 7 * 24 * 60;
+
+/// Convert one OAuth usage window into a [`RateWindow`].
+///
+/// `utilization` is already percent-scale, so it maps directly onto
+/// `used_percent`. `resets_at` (RFC 3339) is parsed and also humanized into
+/// `reset_description` (e.g. "in 2h 15m"), which is what the human renderer
+/// displays.
+fn parse_usage_window(
+    window: Option<&ClaudeUsageWindow>,
+    window_minutes: i32,
+) -> Option<RateWindow> {
+    let window = window?;
+    let used_percent = window.utilization?;
+    let resets_at = window.resets_at.as_ref().and_then(|s| s.parse().ok());
+    let reset_description = resets_at.map(crate::util::time::format_countdown);
+    Some(RateWindow {
+        used_percent,
+        window_minutes: Some(window_minutes),
+        resets_at,
+        reset_description,
+    })
+}
+
+/// Parse the OAuth usage response into a `UsageSnapshot`.
+///
+/// Window mapping: primary = `five_hour`, secondary = `seven_day`,
+/// tertiary = `seven_day_opus` (falling back to `seven_day_sonnet`).
+/// Identity comes from the local `oauthAccount` config, since the usage
+/// endpoint does not return account info.
+fn parse_oauth_usage_response(response: &ClaudeOauthUsageResponse) -> UsageSnapshot {
     let now = Utc::now();
 
-    let primary = response.rate_limit.as_ref().and_then(|rl| {
-        match (rl.requests_remaining, rl.requests_limit) {
-            (Some(remaining), Some(limit)) if limit > 0 => {
-                let used_percent = ((limit - remaining) as f64 / limit as f64) * 100.0;
-                Some(RateWindow {
-                    used_percent,
-                    window_minutes: None,
-                    resets_at: rl.resets_at.as_ref().and_then(|s| s.parse().ok()),
-                    reset_description: None,
-                })
-            }
-            _ => None,
-        }
-    });
-
-    let secondary =
-        response
-            .rate_limit
-            .as_ref()
-            .and_then(|rl| match (rl.tokens_remaining, rl.tokens_limit) {
-                (Some(remaining), Some(limit)) if limit > 0 => {
-                    let used_percent = ((limit - remaining) as f64 / limit as f64) * 100.0;
-                    Some(RateWindow {
-                        used_percent,
-                        window_minutes: None,
-                        resets_at: rl.resets_at.as_ref().and_then(|s| s.parse().ok()),
-                        reset_description: None,
-                    })
-                }
-                _ => None,
-            });
-
-    let identity = Some(ProviderIdentity {
-        account_email: response.account.as_ref().and_then(|a| a.email.clone()),
-        account_organization: response
-            .account
-            .as_ref()
-            .and_then(|a| a.organization.clone()),
-        login_method: Some("oauth".to_string()),
-    });
+    let primary = parse_usage_window(response.five_hour.as_ref(), FIVE_HOUR_WINDOW_MINUTES);
+    let secondary = parse_usage_window(response.seven_day.as_ref(), SEVEN_DAY_WINDOW_MINUTES);
+    let tertiary = parse_usage_window(response.seven_day_opus.as_ref(), SEVEN_DAY_WINDOW_MINUTES)
+        .or_else(|| {
+            parse_usage_window(response.seven_day_sonnet.as_ref(), SEVEN_DAY_WINDOW_MINUTES)
+        });
 
     UsageSnapshot {
         primary,
         secondary,
-        tertiary: None,
+        tertiary,
         updated_at: now,
-        identity,
+        identity: Some(local_identity_with_method("oauth")),
     }
 }
 
@@ -658,54 +755,69 @@ mod tests {
     }
 
     // =========================================================================
-    // API Response Parsing Tests
+    // OAuth Usage Response Parsing Tests
     // =========================================================================
 
+    /// Real-shape payload from `GET /api/oauth/usage` (see issue #8).
+    /// `utilization` is already percent-scale; `resets_at` is RFC 3339.
+    fn sample_usage_json() -> &'static str {
+        r#"{
+            "five_hour": {"utilization": 18.0, "resets_at": "2030-01-01T05:00:00Z"},
+            "seven_day": {"utilization": 42.0, "resets_at": "2030-01-04T00:00:00+00:00"},
+            "seven_day_opus": {"utilization": 7.5, "resets_at": "2030-01-04T00:00:00Z"},
+            "seven_day_sonnet": {"utilization": 12.0, "resets_at": "2030-01-04T00:00:00Z"},
+            "extra_field_ignored": {"foo": "bar"}
+        }"#
+    }
+
     #[test]
-    fn parse_api_response_full_data() {
-        let response = ClaudeRateLimitResponse {
-            rate_limit: Some(ClaudeRateLimit {
-                requests_remaining: Some(70),
-                requests_limit: Some(100),
-                tokens_remaining: Some(80_000),
-                tokens_limit: Some(100_000),
-                resets_at: Some("2026-01-18T12:00:00Z".to_string()),
-            }),
-            usage: None,
-            account: Some(ClaudeAccount {
-                email: Some("test@example.com".to_string()),
-                organization: Some("Test Org".to_string()),
-                plan: Some("pro".to_string()),
-            }),
-        };
+    fn parse_usage_response_full_data() {
+        let response: ClaudeOauthUsageResponse =
+            serde_json::from_str(sample_usage_json()).expect("deserialize");
+        let snapshot = parse_oauth_usage_response(&response);
 
-        let snapshot = parse_api_response(&response);
-
-        // Primary (requests): 30 used out of 100 = 30%
+        // Primary = five_hour; utilization maps directly to used_percent.
         let primary = snapshot.primary.expect("primary");
-        assert!((primary.used_percent - 30.0).abs() < f64::EPSILON);
+        assert!((primary.used_percent - 18.0).abs() < f64::EPSILON);
+        assert_eq!(primary.window_minutes, Some(FIVE_HOUR_WINDOW_MINUTES));
         assert!(primary.resets_at.is_some());
+        let desc = primary.reset_description.expect("reset description");
+        assert!(!desc.is_empty());
 
-        // Secondary (tokens): 20000 used out of 100000 = 20%
+        // Secondary = seven_day.
         let secondary = snapshot.secondary.expect("secondary");
-        assert!((secondary.used_percent - 20.0).abs() < f64::EPSILON);
+        assert!((secondary.used_percent - 42.0).abs() < f64::EPSILON);
+        assert_eq!(secondary.window_minutes, Some(SEVEN_DAY_WINDOW_MINUTES));
 
-        // Identity
+        // Tertiary = seven_day_opus when present (Sonnet is the fallback).
+        let tertiary = snapshot.tertiary.expect("tertiary");
+        assert!((tertiary.used_percent - 7.5).abs() < f64::EPSILON);
+
         let identity = snapshot.identity.expect("identity");
-        assert_eq!(identity.account_email.as_deref(), Some("test@example.com"));
-        assert_eq!(identity.account_organization.as_deref(), Some("Test Org"));
         assert_eq!(identity.login_method.as_deref(), Some("oauth"));
     }
 
     #[test]
-    fn parse_api_response_empty_response() {
-        let response = ClaudeRateLimitResponse {
-            rate_limit: None,
-            usage: None,
-            account: None,
-        };
+    fn parse_usage_response_future_reset_has_countdown_description() {
+        let response: ClaudeOauthUsageResponse =
+            serde_json::from_str(sample_usage_json()).expect("deserialize");
+        let snapshot = parse_oauth_usage_response(&response);
 
-        let snapshot = parse_api_response(&response);
+        // The fixture timestamps are far in the future, so the humanized
+        // description must be a countdown ("in ...").
+        let primary = snapshot.primary.expect("primary");
+        let desc = primary.reset_description.expect("reset description");
+        assert!(
+            desc.starts_with("in "),
+            "expected countdown description, got: {desc}"
+        );
+    }
+
+    #[test]
+    fn parse_usage_response_empty() {
+        let response: ClaudeOauthUsageResponse = serde_json::from_str("{}").expect("deserialize");
+        let snapshot = parse_oauth_usage_response(&response);
+
         assert!(snapshot.primary.is_none());
         assert!(snapshot.secondary.is_none());
         assert!(snapshot.tertiary.is_none());
@@ -716,105 +828,126 @@ mod tests {
     }
 
     #[test]
-    fn parse_api_response_only_requests() {
-        let response = ClaudeRateLimitResponse {
-            rate_limit: Some(ClaudeRateLimit {
-                requests_remaining: Some(50),
-                requests_limit: Some(100),
-                tokens_remaining: None,
-                tokens_limit: None,
-                resets_at: None,
-            }),
-            usage: None,
-            account: None,
-        };
+    fn parse_usage_response_tertiary_falls_back_to_sonnet() {
+        let json = r#"{
+            "five_hour": {"utilization": 0.0, "resets_at": null},
+            "seven_day_sonnet": {"utilization": 12.0, "resets_at": "2030-01-04T00:00:00Z"}
+        }"#;
+        let response: ClaudeOauthUsageResponse = serde_json::from_str(json).expect("deserialize");
+        let snapshot = parse_oauth_usage_response(&response);
 
-        let snapshot = parse_api_response(&response);
+        let tertiary = snapshot.tertiary.expect("tertiary");
+        assert!((tertiary.used_percent - 12.0).abs() < f64::EPSILON);
+        assert_eq!(tertiary.window_minutes, Some(SEVEN_DAY_WINDOW_MINUTES));
+    }
+
+    #[test]
+    fn parse_usage_response_missing_utilization_skips_window() {
+        let json = r#"{"five_hour": {"resets_at": "2030-01-01T05:00:00Z"}}"#;
+        let response: ClaudeOauthUsageResponse = serde_json::from_str(json).expect("deserialize");
+        let snapshot = parse_oauth_usage_response(&response);
+
+        // A window without utilization carries no usable percentage.
+        assert!(snapshot.primary.is_none());
+    }
+
+    #[test]
+    fn parse_usage_response_invalid_resets_at() {
+        let json = r#"{"five_hour": {"utilization": 50.0, "resets_at": "not-a-valid-timestamp"}}"#;
+        let response: ClaudeOauthUsageResponse = serde_json::from_str(json).expect("deserialize");
+        let snapshot = parse_oauth_usage_response(&response);
+
         let primary = snapshot.primary.expect("primary");
         assert!((primary.used_percent - 50.0).abs() < f64::EPSILON);
-        assert!(snapshot.secondary.is_none());
-    }
-
-    #[test]
-    fn parse_api_response_only_tokens() {
-        let response = ClaudeRateLimitResponse {
-            rate_limit: Some(ClaudeRateLimit {
-                requests_remaining: None,
-                requests_limit: None,
-                tokens_remaining: Some(25_000),
-                tokens_limit: Some(100_000),
-                resets_at: None,
-            }),
-            usage: None,
-            account: None,
-        };
-
-        let snapshot = parse_api_response(&response);
-        assert!(snapshot.primary.is_none());
-        let secondary = snapshot.secondary.expect("secondary");
-        assert!((secondary.used_percent - 75.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn parse_api_response_zero_limit_handled() {
-        let response = ClaudeRateLimitResponse {
-            rate_limit: Some(ClaudeRateLimit {
-                requests_remaining: Some(0),
-                requests_limit: Some(0), // Edge case: zero limit
-                tokens_remaining: Some(0),
-                tokens_limit: Some(0),
-                resets_at: None,
-            }),
-            usage: None,
-            account: None,
-        };
-
-        let snapshot = parse_api_response(&response);
-        // Zero limits should result in None (division by zero protection)
-        assert!(snapshot.primary.is_none());
-        assert!(snapshot.secondary.is_none());
-    }
-
-    #[test]
-    fn parse_api_response_boundary_percentages() {
-        // 100% used (0 remaining)
-        let response = ClaudeRateLimitResponse {
-            rate_limit: Some(ClaudeRateLimit {
-                requests_remaining: Some(0),
-                requests_limit: Some(100),
-                tokens_remaining: Some(100_000),
-                tokens_limit: Some(100_000), // 0% used
-                resets_at: None,
-            }),
-            usage: None,
-            account: None,
-        };
-
-        let snapshot = parse_api_response(&response);
-        let primary = snapshot.primary.expect("primary");
-        let secondary = snapshot.secondary.expect("secondary");
-        assert!((primary.used_percent - 100.0).abs() < f64::EPSILON);
-        assert!((secondary.used_percent - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn parse_api_response_invalid_resets_at() {
-        let response = ClaudeRateLimitResponse {
-            rate_limit: Some(ClaudeRateLimit {
-                requests_remaining: Some(50),
-                requests_limit: Some(100),
-                tokens_remaining: None,
-                tokens_limit: None,
-                resets_at: Some("not-a-valid-timestamp".to_string()),
-            }),
-            usage: None,
-            account: None,
-        };
-
-        let snapshot = parse_api_response(&response);
-        let primary = snapshot.primary.expect("primary");
-        // Invalid timestamp should result in None
+        // Invalid timestamp should result in no reset info, but the window
+        // itself must survive.
         assert!(primary.resets_at.is_none());
+        assert!(primary.reset_description.is_none());
+    }
+
+    // =========================================================================
+    // Credentials File Parsing Tests (claudeAiOauth schema)
+    // =========================================================================
+
+    #[test]
+    fn token_from_credentials_json_real_schema() {
+        let future_ms = Utc::now().timestamp_millis() + 3_600_000;
+        let content = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"sk-ant-oat01-test-token","refreshToken":"sk-ant-ort01-refresh","expiresAt":{future_ms},"scopes":["user:inference"],"subscriptionType":"max"}},"mcpOAuth":{{}}}}"#
+        );
+
+        assert_eq!(
+            token_from_credentials_json(&content).as_deref(),
+            Some("sk-ant-oat01-test-token")
+        );
+    }
+
+    #[test]
+    fn token_from_credentials_json_skips_expired_token() {
+        let past_ms = Utc::now().timestamp_millis() - 1_000;
+        let content = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"sk-ant-oat01-stale","expiresAt":{past_ms}}}}}"#
+        );
+
+        assert!(token_from_credentials_json(&content).is_none());
+    }
+
+    #[test]
+    fn token_from_credentials_json_allows_missing_expiry() {
+        let content = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-no-expiry"}}"#;
+
+        assert_eq!(
+            token_from_credentials_json(content).as_deref(),
+            Some("sk-ant-oat01-no-expiry")
+        );
+    }
+
+    #[test]
+    fn token_from_credentials_json_rejects_missing_or_empty_token() {
+        assert!(token_from_credentials_json(r#"{"claudeAiOauth":{}}"#).is_none());
+        assert!(token_from_credentials_json(r#"{"claudeAiOauth":{"accessToken":""}}"#).is_none());
+    }
+
+    #[test]
+    fn token_from_credentials_json_rejects_other_schemas() {
+        // A top-level `credentials` key is NOT what Claude Code writes.
+        assert!(token_from_credentials_json(r#"{"credentials":{"email":"a@b.c"}}"#).is_none());
+        // MCP-only auth has no primary Claude token.
+        assert!(
+            token_from_credentials_json(r#"{"mcpOAuth":{"server":{"accessToken":"x"}}}"#).is_none()
+        );
+        assert!(token_from_credentials_json("not json").is_none());
+    }
+
+    // =========================================================================
+    // Main Config (oauthAccount) Identity Tests
+    // =========================================================================
+
+    #[test]
+    fn oauth_account_from_json_real_schema() {
+        let content = r#"{
+            "oauthAccount": {
+                "accountUuid": "123e4567-e89b-12d3-a456-426614174000",
+                "emailAddress": "user@example.com",
+                "organizationUuid": "223e4567-e89b-12d3-a456-426614174000",
+                "organizationName": "User's Organization",
+                "organizationRole": "admin"
+            },
+            "numStartups": 42
+        }"#;
+
+        let account = oauth_account_from_json(content).expect("account");
+        assert_eq!(account.email_address.as_deref(), Some("user@example.com"));
+        assert_eq!(
+            account.organization_name.as_deref(),
+            Some("User's Organization")
+        );
+    }
+
+    #[test]
+    fn oauth_account_from_json_missing_account() {
+        assert!(oauth_account_from_json("{}").is_none());
+        assert!(oauth_account_from_json("not json").is_none());
     }
 
     // =========================================================================

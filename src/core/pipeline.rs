@@ -150,12 +150,15 @@ async fn execute_strategy(
 
         // Claude strategies
         (Provider::Claude, "claude-oauth") => {
-            // Get token from keyring
-            let entry = keyring::Entry::new("caut", "claude-oauth-token")
-                .map_err(|e| CautError::Config(format!("Keyring error: {e}")))?;
-            let token = entry
-                .get_password()
-                .map_err(|_| CautError::Config("No OAuth token found".to_string()))?;
+            // Same fallback chain as the strategy's availability check:
+            // keyring -> Claude Code's .credentials.json -> macOS Keychain.
+            let token = claude::get_oauth_token().ok_or_else(|| {
+                CautError::Config(
+                    "No Claude OAuth token found (checked keyring, \
+                     <claude_dir>/.credentials.json, and macOS Keychain)"
+                        .to_string(),
+                )
+            })?;
             claude::fetch_oauth(&token).await
         }
         (Provider::Claude, "claude-web") => claude::fetch_web().await,
