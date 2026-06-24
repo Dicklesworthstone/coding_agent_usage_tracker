@@ -45,3 +45,6 @@ test-results.log
 # Beads sync artifacts
 .beads/.sync.lock
 .beads/sync_base.jsonl
+
+# Isolated cargo target dirs from build gates (machine-local, never tracked)
+target-gate*/
