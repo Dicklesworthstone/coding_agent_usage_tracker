@@ -24,10 +24,7 @@
       "type": "array",
       "description": "Array of provider payloads (type depends on command)",
       "items": {
-        "oneOf": [
-          { "$ref": "#/$defs/ProviderPayload" },
-          { "$ref": "#/$defs/CostPayload" }
-        ]
+        "oneOf": [{ "$ref": "#/$defs/ProviderPayload" }, { "$ref": "#/$defs/CostPayload" }]
       }
     },
     "errors": {

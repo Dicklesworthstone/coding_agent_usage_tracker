@@ -3,17 +3,17 @@
   "input_tokens": 150000,
   "output_tokens": 50000,
   "total_tokens": 200000,
-  "total_cost": 8.50,
+  "total_cost": 8.5,
   "by_model": {
     "gpt-4-turbo": {
       "input_tokens": 100000,
       "output_tokens": 35000,
-      "total_cost": 5.50
+      "total_cost": 5.5
     },
     "gpt-4": {
       "input_tokens": 50000,
       "output_tokens": 15000,
-      "total_cost": 3.00
+      "total_cost": 3.0
     }
   }
 }
