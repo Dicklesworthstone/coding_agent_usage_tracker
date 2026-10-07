@@ -1,6 +1,6 @@
 //! `caut config` command: locate, show and create the config file.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::cli::args::{ConfigCommand, OutputFormat};
 use crate::core::provider::Provider;
@@ -14,37 +14,9 @@ use crate::storage::config::{Config, ENV_CONFIG};
 /// without `--force` (`init`), or cannot be written.
 pub fn execute(cmd: &ConfigCommand, format: OutputFormat, pretty: bool) -> Result<()> {
     let path = config_path();
-    match cmd {
-        ConfigCommand::Path => {
-            println!("{}", path.display());
-            Ok(())
-        }
-        ConfigCommand::Show => {
-            let config = Config::load_from(&path)?;
-            config.validate()?;
-            let rendered = match format {
-                OutputFormat::Json => {
-                    if pretty {
-                        serde_json::to_string_pretty(&config)?
-                    } else {
-                        serde_json::to_string(&config)?
-                    }
-                }
-                OutputFormat::Human | OutputFormat::Md => {
-                    let body = toml::to_string_pretty(&config).map_err(|e| {
-                        CautError::Config(format!("Failed to serialize config: {e}"))
-                    })?;
-                    let origin = if path.exists() {
-                        format!("# Loaded from {}", path.display())
-                    } else {
-                        format!("# No config file at {} — showing defaults", path.display())
-                    };
-                    format!("{origin}\n{body}")
-                }
-            };
-            println!("{rendered}");
-            Ok(())
-        }
+    let output = match cmd {
+        ConfigCommand::Path => path.display().to_string(),
+        ConfigCommand::Show => render_show(&path, format, pretty)?,
         ConfigCommand::Init { force } => {
             if path.exists() && !force {
                 return Err(CautError::Config(format!(
@@ -56,8 +28,29 @@ pub fn execute(cmd: &ConfigCommand, format: OutputFormat, pretty: bool) -> Resul
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(&path, starter_config())?;
-            println!("Wrote {}", path.display());
-            Ok(())
+            format!("Wrote {}", path.display())
+        }
+    };
+    println!("{output}");
+    Ok(())
+}
+
+/// The effective configuration as TOML (human/md) or JSON.
+fn render_show(path: &Path, format: OutputFormat, pretty: bool) -> Result<String> {
+    let config = Config::load_from(path)?;
+    config.validate()?;
+    match format {
+        OutputFormat::Json if pretty => Ok(serde_json::to_string_pretty(&config)?),
+        OutputFormat::Json => Ok(serde_json::to_string(&config)?),
+        OutputFormat::Human | OutputFormat::Md => {
+            let body = toml::to_string_pretty(&config)
+                .map_err(|e| CautError::Config(format!("Failed to serialize config: {e}")))?;
+            let origin = if path.exists() {
+                format!("# Loaded from {}", path.display())
+            } else {
+                format!("# No config file at {} — showing defaults", path.display())
+            };
+            Ok(format!("{origin}\n{body}"))
         }
     }
 }

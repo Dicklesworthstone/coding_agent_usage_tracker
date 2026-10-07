@@ -5,6 +5,7 @@
 use crate::core::models::{
     CostPayload, ProviderCostSnapshot, ProviderPayload, RateWindow, StatusIndicator,
 };
+use crate::core::prediction::UsagePace;
 use crate::core::provider::Provider;
 use crate::error::Result;
 use crate::util::time::format_countdown;
@@ -79,10 +80,13 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
         content_lines.push(format_rate_window_segments(label, primary, no_color));
     }
 
-    // Secondary window
+    // Secondary window, with CodexBar's pace line for weekly windows
     if let Some(secondary) = &payload.usage.secondary {
         let label = provider.map_or("Weekly", Provider::weekly_label);
         content_lines.push(format_rate_window_segments(label, secondary, no_color));
+        if let Some(pace) = weekly_pace_line(secondary) {
+            content_lines.push(vec![Segment::plain(pace)]);
+        }
     }
 
     // Tertiary window (Claude's Opus/Sonnet tier, Gemini Flash Lite, ...)
@@ -244,6 +248,14 @@ fn format_rate_window_segments<'a>(
     segments.push(Segment::plain(format!(" {reset}")));
 
     segments
+}
+
+/// `Pace: …` for a weekly window whose reset time is known.
+fn weekly_pace_line(window: &RateWindow) -> Option<String> {
+    if window.window_minutes != Some(10_080) {
+        return None;
+    }
+    UsagePace::of(window, chrono::Utc::now()).map(|pace| format!("Pace: {}", pace.summary()))
 }
 
 /// Panel title: `<Display name> [version] (<source>)`.

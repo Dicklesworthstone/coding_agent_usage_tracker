@@ -3,7 +3,10 @@
 //! Provides velocity calculations over recent history snapshots. Velocity is
 //! measured as percentage points per hour.
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
+use serde::Serialize;
+
+use crate::core::models::RateWindow;
 
 use crate::storage::StoredSnapshot;
 
@@ -61,6 +64,165 @@ pub fn smoothed_velocity(history: &[StoredSnapshot], window: Duration, alpha: f6
     }
 
     Some(ema)
+}
+
+// =============================================================================
+// Pace (single-snapshot forecast)
+// =============================================================================
+
+/// How far actual usage is from a straight-line burn of the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PaceStage {
+    OnTrack,
+    SlightlyAhead,
+    Ahead,
+    FarAhead,
+    SlightlyBehind,
+    Behind,
+    FarBehind,
+}
+
+impl PaceStage {
+    /// `CodexBar`'s thresholds on `actual - expected` percentage points.
+    #[must_use]
+    pub fn for_delta(delta: f64) -> Self {
+        let magnitude = delta.abs();
+        if magnitude <= 2.0 {
+            Self::OnTrack
+        } else if magnitude <= 6.0 {
+            if delta >= 0.0 {
+                Self::SlightlyAhead
+            } else {
+                Self::SlightlyBehind
+            }
+        } else if magnitude <= 12.0 {
+            if delta >= 0.0 {
+                Self::Ahead
+            } else {
+                Self::Behind
+            }
+        } else if delta >= 0.0 {
+            Self::FarAhead
+        } else {
+            Self::FarBehind
+        }
+    }
+}
+
+/// Pace of a rate window, computed from one snapshot.
+///
+/// A port of `CodexBar`'s `UsagePace.weekly`: the share of the window that
+/// has elapsed is the usage a steady burn would have reached; the average
+/// rate so far projects when the window runs out.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsagePace {
+    pub stage: PaceStage,
+    /// `actual - expected`: positive means burning faster than the window allows.
+    pub delta_percent: f64,
+    pub expected_used_percent: f64,
+    pub actual_used_percent: f64,
+    /// Seconds until the window is spent at the average rate so far, when
+    /// that happens before the reset.
+    pub eta_seconds: Option<f64>,
+    /// Whether the average rate so far lasts until the reset.
+    pub will_last_to_reset: bool,
+}
+
+impl UsagePace {
+    /// Compute the pace of `window` at `now`.
+    ///
+    /// `None` without a reset time or window length, after the reset, or
+    /// when the reset is further away than one window (the window has not
+    /// started).
+    #[must_use]
+    pub fn of(window: &RateWindow, now: DateTime<Utc>) -> Option<Self> {
+        let resets_at = window.resets_at?;
+        let minutes = window.window_minutes.filter(|m| *m > 0)?;
+        let duration = f64::from(minutes) * 60.0;
+        #[allow(clippy::cast_precision_loss)] // sub-second precision is irrelevant here
+        let until_reset = (resets_at - now).num_milliseconds() as f64 / 1000.0;
+        if until_reset <= 0.0 || until_reset > duration {
+            return None;
+        }
+        let elapsed = (duration - until_reset).clamp(0.0, duration);
+        let expected = (elapsed / duration * 100.0).clamp(0.0, 100.0);
+        let actual = window.used_percent.clamp(0.0, 100.0);
+        if elapsed <= 0.0 && actual > 0.0 {
+            return None;
+        }
+        let delta = actual - expected;
+
+        let mut eta_seconds = None;
+        let mut will_last_to_reset = false;
+        if actual >= 100.0 {
+            eta_seconds = Some(0.0);
+        } else if elapsed > 0.0 && actual > 0.0 {
+            let rate = actual / elapsed;
+            let candidate = (100.0 - actual) / rate;
+            if candidate >= until_reset {
+                will_last_to_reset = true;
+            } else {
+                eta_seconds = Some(candidate);
+            }
+        } else if elapsed > 0.0 {
+            will_last_to_reset = true;
+        }
+
+        Some(Self {
+            stage: PaceStage::for_delta(delta),
+            delta_percent: delta,
+            expected_used_percent: expected,
+            actual_used_percent: actual,
+            eta_seconds,
+            will_last_to_reset,
+        })
+    }
+
+    /// `CodexBar`'s summary: `On pace` / `N% in deficit` / `N% in reserve`,
+    /// then `Runs out in …` or `Lasts until reset`.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        #[allow(clippy::cast_possible_truncation)] // a percentage
+        let points = self.delta_percent.abs().round() as i64;
+        let left = if points == 0 || self.stage == PaceStage::OnTrack {
+            "On pace".to_string()
+        } else if self.delta_percent > 0.0 {
+            format!("{points}% in deficit")
+        } else {
+            format!("{points}% in reserve")
+        };
+        let right = if self.will_last_to_reset {
+            Some("Lasts until reset".to_string())
+        } else {
+            self.eta_seconds.map(|eta| {
+                if eta < 60.0 {
+                    "Runs out now".to_string()
+                } else {
+                    format!("Runs out in {}", format_duration_secs(eta))
+                }
+            })
+        };
+        right.map_or_else(|| left.clone(), |right| format!("{left} · {right}"))
+    }
+}
+
+/// Compact duration: `3d 4h`, `5h 12m`, `42m`.
+#[must_use]
+pub fn format_duration_secs(seconds: f64) -> String {
+    #[allow(clippy::cast_possible_truncation)] // bounded, non-negative
+    let total_minutes = (seconds.max(0.0) / 60.0).round() as i64;
+    let days = total_minutes / (24 * 60);
+    let hours = (total_minutes % (24 * 60)) / 60;
+    let minutes = total_minutes % 60;
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
 }
 
 /// Detect a likely usage reset between two snapshots.
@@ -269,5 +431,73 @@ mod tests {
         let velocity = smoothed_velocity(&history, Duration::hours(4), 0.5).unwrap();
         // Interval velocities: 20, 10 (pct/hour), EMA with alpha=0.5 => 15
         assert_float_eq!(velocity, 15.0, 0.01);
+    }
+
+    fn weekly_window(used: f64, hours_until_reset: i64, now: DateTime<Utc>) -> RateWindow {
+        RateWindow {
+            used_percent: used,
+            window_minutes: Some(10_080),
+            resets_at: Some(now + Duration::hours(hours_until_reset)),
+            reset_description: None,
+        }
+    }
+
+    #[test]
+    fn pace_halfway_through_week() {
+        let now = Utc::now();
+        // 84h of 168h elapsed: a steady burn would be at 50%.
+        let on_pace = UsagePace::of(&weekly_window(49.0, 84, now), now).unwrap();
+        assert_eq!(on_pace.stage, PaceStage::OnTrack);
+        assert_float_eq!(on_pace.expected_used_percent, 50.0, 0.01);
+        assert_eq!(on_pace.summary(), "On pace · Lasts until reset");
+
+        let ahead = UsagePace::of(&weekly_window(70.0, 84, now), now).unwrap();
+        assert_eq!(ahead.stage, PaceStage::FarAhead);
+        // 70% in 84h => 30% more takes 36h, before the 84h reset.
+        assert_float_eq!(ahead.eta_seconds.unwrap(), 36.0 * 3600.0, 1.0);
+        assert!(!ahead.will_last_to_reset);
+        assert_eq!(ahead.summary(), "20% in deficit · Runs out in 1d 12h");
+
+        let behind = UsagePace::of(&weekly_window(45.0, 84, now), now).unwrap();
+        assert_eq!(behind.stage, PaceStage::SlightlyBehind);
+        assert!(behind.summary().starts_with("5% in reserve"));
+    }
+
+    #[test]
+    fn pace_edge_cases() {
+        let now = Utc::now();
+        let spent = UsagePace::of(&weekly_window(100.0, 10, now), now).unwrap();
+        assert_eq!(spent.eta_seconds, Some(0.0));
+        assert!(spent.summary().ends_with("Runs out now"));
+
+        let idle = UsagePace::of(&weekly_window(0.0, 100, now), now).unwrap();
+        assert!(idle.will_last_to_reset);
+
+        // No reset time, no window length, past reset, or not yet started.
+        let mut window = weekly_window(10.0, 10, now);
+        window.resets_at = None;
+        assert!(UsagePace::of(&window, now).is_none());
+        let mut window = weekly_window(10.0, 10, now);
+        window.window_minutes = None;
+        assert!(UsagePace::of(&window, now).is_none());
+        assert!(UsagePace::of(&weekly_window(10.0, -1, now), now).is_none());
+        assert!(UsagePace::of(&weekly_window(10.0, 500, now), now).is_none());
+    }
+
+    #[test]
+    fn pace_stage_thresholds() {
+        assert_eq!(PaceStage::for_delta(2.0), PaceStage::OnTrack);
+        assert_eq!(PaceStage::for_delta(-2.0), PaceStage::OnTrack);
+        assert_eq!(PaceStage::for_delta(5.0), PaceStage::SlightlyAhead);
+        assert_eq!(PaceStage::for_delta(-10.0), PaceStage::Behind);
+        assert_eq!(PaceStage::for_delta(13.0), PaceStage::FarAhead);
+    }
+
+    #[test]
+    fn duration_formatting() {
+        assert_eq!(format_duration_secs(42.0 * 60.0), "42m");
+        assert_eq!(format_duration_secs(5.0 * 3600.0 + 12.0 * 60.0), "5h 12m");
+        assert_eq!(format_duration_secs(3.0 * 86_400.0 + 4.0 * 3600.0), "3d 4h");
+        assert_eq!(format_duration_secs(-5.0), "0m");
     }
 }
