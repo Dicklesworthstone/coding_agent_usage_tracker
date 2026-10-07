@@ -141,7 +141,7 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
                     source: outcome.source_label,
                     status,
                     usage: snapshot,
-                    credits: None, // TODO: Fetch credits
+                    credits: outcome.credits,
                     antigravity_plan_info: None,
                     openai_dashboard: None,
                     auth_warning,

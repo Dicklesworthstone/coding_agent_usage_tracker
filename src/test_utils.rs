@@ -82,6 +82,7 @@ pub fn make_test_usage_snapshot() -> UsageSnapshot {
         secondary: Some(make_test_rate_window(45.0)),
         tertiary: None,
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: Utc::now(),
         identity: Some(ProviderIdentity {
             account_email: Some("test@example.com".to_string()),
@@ -99,6 +100,7 @@ pub fn make_test_usage_snapshot_with_tertiary() -> UsageSnapshot {
         secondary: Some(make_test_rate_window(45.0)),
         tertiary: Some(make_test_rate_window(55.0)),
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: Utc::now(),
         identity: Some(ProviderIdentity {
             account_email: Some("test@example.com".to_string()),

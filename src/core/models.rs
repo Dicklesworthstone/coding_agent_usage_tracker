@@ -97,6 +97,12 @@ pub struct UsageSnapshot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scoped: Vec<ScopedWindow>,
 
+    /// Money-denominated spend against a budget or balance (Cursor on-demand
+    /// spend, Amp credits, Kiro overages, ...), for providers whose limit is
+    /// a currency amount rather than a percentage window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_cost: Option<ProviderCostSnapshot>,
+
     /// When this snapshot was captured.
     pub updated_at: DateTime<Utc>,
 
@@ -111,12 +117,34 @@ impl UsageSnapshot {
     pub fn new(primary: RateWindow) -> Self {
         Self {
             primary: Some(primary),
+            ..Self::empty()
+        }
+    }
+
+    /// A snapshot with no windows, captured now. Providers fill in what they
+    /// know with struct-update syntax.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            primary: None,
             secondary: None,
             tertiary: None,
             scoped: Vec::new(),
+            provider_cost: None,
             updated_at: Utc::now(),
             identity: None,
         }
+    }
+
+    /// Whether any quota data (a window, a scoped window or a spend budget)
+    /// is present, as opposed to identity only.
+    #[must_use]
+    pub const fn has_quota(&self) -> bool {
+        self.primary.is_some()
+            || self.secondary.is_some()
+            || self.tertiary.is_some()
+            || !self.scoped.is_empty()
+            || self.provider_cost.is_some()
     }
 
     /// The model-scoped quota closest to its cap, if any.
@@ -188,6 +216,45 @@ impl ScopedWindow {
     #[must_use]
     pub fn is_near_limit(&self, threshold: f64) -> bool {
         self.window.used_percent >= threshold
+    }
+}
+
+// =============================================================================
+// Provider Cost
+// =============================================================================
+
+/// Currency spend against a limit, as some providers meter usage in money
+/// (or credits) rather than in percentage windows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCostSnapshot {
+    /// Amount spent in the current period.
+    pub used: f64,
+
+    /// The period's cap. Zero means the provider reports no cap.
+    pub limit: f64,
+
+    /// ISO 4217 code (`USD`), or a unit label such as `credits` when the
+    /// provider meters in its own credits.
+    pub currency_code: String,
+
+    /// Human-friendly period label, e.g. `Monthly`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub period: Option<String>,
+
+    /// When the period renews.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<DateTime<Utc>>,
+
+    /// When this observation was taken.
+    pub updated_at: DateTime<Utc>,
+}
+
+impl ProviderCostSnapshot {
+    /// Percent of the limit consumed, or `None` when there is no cap.
+    #[must_use]
+    pub fn used_percent(&self) -> Option<f64> {
+        (self.limit > 0.0).then(|| (self.used / self.limit * 100.0).clamp(0.0, 100.0))
     }
 }
 

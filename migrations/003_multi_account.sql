@@ -3,8 +3,9 @@
 -- Adds normalized account tracking, switch logging, and provider health
 -- for the multi-account daemon monitoring system.
 
--- Enable WAL mode for better concurrency (daemon + CLI access)
-PRAGMA journal_mode = WAL;
+-- WAL mode (for daemon + CLI concurrency) is enabled when the store opens:
+-- SQLite refuses to change the journal mode inside the transaction that
+-- every migration runs in.
 
 -- Accounts table: normalized account registry
 CREATE TABLE IF NOT EXISTS accounts (

@@ -111,6 +111,7 @@ pub fn usage_snapshot(primary_pct: f64, secondary_pct: Option<f64>) -> UsageSnap
         secondary: secondary_pct.map(|pct| rate_window(pct, 10080)),
         tertiary: None,
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: Utc::now(),
         identity: Some(ProviderIdentity {
             account_email: Some("test@example.com".to_string()),
@@ -134,6 +135,7 @@ pub fn usage_snapshot_full(
         secondary: Some(rate_window(secondary_pct, 10080)),
         tertiary: Some(rate_window(tertiary_pct, 10080)),
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: Utc::now(),
         identity: Some(ProviderIdentity {
             account_email: Some("test@example.com".to_string()),

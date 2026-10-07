@@ -152,6 +152,14 @@ impl HistoryStore {
         let mut conn = Connection::open(path)
             .map_err(|e| CautError::Other(anyhow::anyhow!("open history db: {e}")))?;
 
+        // WAL lets the daemon and CLI read and write concurrently. The mode is
+        // persistent per file, and must be set outside a transaction, so it is
+        // applied here rather than in a migration.
+        conn.query_row("PRAGMA journal_mode = WAL", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| CautError::Other(anyhow::anyhow!("enable WAL: {e}")))?;
+
         run_migrations(&mut conn)?;
 
         Ok(Self { conn })
@@ -1015,6 +1023,7 @@ mod tests {
             secondary: None,
             tertiary: None,
             scoped: Vec::new(),
+            provider_cost: None,
             updated_at: at,
             identity: Some(ProviderIdentity {
                 account_email: Some("user@example.com".to_string()),

@@ -3,6 +3,10 @@
 //! CLI entry point.
 
 #![forbid(unsafe_code)]
+// The usage pipeline dispatches to one async fetcher per provider, which makes
+// the command futures deep enough to overflow the default limit when
+// `clippy::future_not_send` proves them `Send`.
+#![recursion_limit = "256"]
 #![warn(clippy::pedantic, clippy::nursery)]
 #![allow(clippy::module_name_repetitions)]
 

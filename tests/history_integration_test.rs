@@ -38,6 +38,7 @@ fn make_snapshot(at: chrono::DateTime<Utc>, primary_pct: f64) -> UsageSnapshot {
         secondary: None,
         tertiary: None,
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: at,
         identity: Some(ProviderIdentity {
             account_email: Some("test@example.com".to_string()),
@@ -74,6 +75,7 @@ fn make_full_snapshot(
             reset_description: Some("Opus tier".to_string()),
         }),
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: at,
         identity: Some(ProviderIdentity {
             account_email: Some("claude@example.com".to_string()),
@@ -145,7 +147,7 @@ fn test_migration_idempotence() {
         let count = store
             .count_rows("schema_migrations")
             .expect("count migrations");
-        assert_eq!(count, 2, "Should have exactly 2 migrations after run {i}");
+        assert_eq!(count, 3, "Should have exactly 3 migrations after run {i}");
     }
 }
 
@@ -878,6 +880,7 @@ fn test_snapshot_with_no_identity() {
         secondary: None,
         tertiary: None,
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: now,
         identity: None,
     };
@@ -909,6 +912,7 @@ fn test_snapshot_with_no_rate_windows() {
         secondary: None,
         tertiary: None,
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: now,
         identity: Some(ProviderIdentity {
             account_email: Some("test@test.com".to_string()),

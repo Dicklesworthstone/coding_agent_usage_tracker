@@ -16,11 +16,12 @@ use chrono::Utc;
 use serde::Deserialize;
 
 use crate::core::cli_runner::{CLI_TIMEOUT, run_command, run_json_command};
-use crate::core::fetch_plan::{FetchKind, FetchPlan, FetchStrategy};
+use crate::core::fetch_plan::{FetchContext, FetchKind, FetchPlan, FetchStrategy};
 use crate::core::http::{DEFAULT_TIMEOUT, build_client};
 use crate::core::models::{ProviderIdentity, RateWindow, ScopedWindow, UsageSnapshot};
 use crate::core::provider::Provider;
 use crate::error::{CautError, Result};
+use crate::providers::common;
 
 /// Source label for OAuth.
 pub const SOURCE_OAUTH: &str = "oauth";
@@ -50,30 +51,62 @@ pub fn fetch_plan() -> FetchPlan {
             FetchStrategy {
                 id: "claude-oauth",
                 kind: FetchKind::OAuth,
-                is_available: || {
-                    // OAuth requires a token from the keyring, Claude Code's
-                    // credentials file, or the macOS Keychain.
-                    has_oauth_token()
-                },
+                // OAuth requires a token from the selected token account, the
+                // keyring, Claude Code's credentials file, or the macOS Keychain.
+                is_available: |ctx| oauth_token_for(ctx).is_some(),
                 should_fallback: |_| true,
             },
             FetchStrategy {
                 id: "claude-web",
                 kind: FetchKind::Web,
-                is_available: || {
-                    // Web requires macOS with cookies
-                    cfg!(target_os = "macos")
-                },
+                // Web requires a claude.ai `sessionKey` cookie, from the
+                // selected token account or the environment.
+                is_available: |ctx| session_key_for(ctx).is_some(),
                 should_fallback: |_| true,
             },
             FetchStrategy {
                 id: "claude-cli-pty",
                 kind: FetchKind::Cli,
-                is_available: is_cli_available,
+                // The CLI reports whichever account it is logged into, so it
+                // cannot stand in for an explicitly selected token account.
+                is_available: |ctx| ctx.account_token().is_none() && is_cli_available(),
                 should_fallback: |_| false,
             },
         ],
     )
+}
+
+/// Run one strategy from [`fetch_plan`].
+///
+/// # Errors
+/// Returns the strategy's error, or an error for an unknown strategy id.
+pub async fn fetch(strategy_id: &str, ctx: &FetchContext) -> Result<UsageSnapshot> {
+    match strategy_id {
+        "claude-oauth" => {
+            let token = oauth_token_for(ctx).ok_or_else(|| {
+                CautError::Config(
+                    "No Claude OAuth token found (checked token accounts, keyring, \
+                     <claude_dir>/.credentials.json, and macOS Keychain)"
+                        .to_string(),
+                )
+            })?;
+            fetch_oauth(&token).await
+        }
+        "claude-web" => {
+            let session_key = session_key_for(ctx).ok_or_else(|| {
+                common::missing_credential(
+                    Provider::Claude,
+                    "set CLAUDE_SESSION_KEY or add a token account with the claude.ai sessionKey cookie",
+                )
+            })?;
+            fetch_web(&session_key).await
+        }
+        "claude-cli-pty" => fetch_cli().await,
+        _ => Err(crate::providers::unknown_strategy(
+            Provider::Claude,
+            strategy_id,
+        )),
+    }
 }
 
 /// Check if the Claude CLI is available.
@@ -81,9 +114,51 @@ fn is_cli_available() -> bool {
     which::which(CLI_NAME).is_ok()
 }
 
-/// Check if an OAuth token is available from any supported source.
-fn has_oauth_token() -> bool {
-    get_oauth_token().is_some()
+/// Whether a credential is an Anthropic OAuth access token (`sk-ant-oat…`)
+/// rather than a claude.ai session cookie.
+fn is_oauth_access_token(token: &str) -> bool {
+    common::strip_bearer(token).starts_with("sk-ant-oat")
+}
+
+/// The OAuth token to use for this fetch.
+///
+/// A selected token account wins when it holds an OAuth token; a selected
+/// session-cookie account disables OAuth so the fetch reports that account
+/// rather than the locally logged-in one. Without a selection, local sources
+/// come first, then the active token account.
+fn oauth_token_for(ctx: &FetchContext) -> Option<String> {
+    if let Some(token) = ctx.account_token() {
+        return is_oauth_access_token(token).then(|| common::strip_bearer(token).to_string());
+    }
+    get_oauth_token().or_else(|| {
+        common::active_token_account(Provider::Claude).filter(|t| is_oauth_access_token(t))
+    })
+}
+
+/// The claude.ai `sessionKey` cookie to use for this fetch.
+fn session_key_for(ctx: &FetchContext) -> Option<String> {
+    if let Some(token) = ctx.account_token() {
+        return (!is_oauth_access_token(token))
+            .then(|| session_key_from_credential(token))
+            .flatten();
+    }
+    common::env_secret(&["CLAUDE_SESSION_KEY", "CLAUDE_COOKIE"])
+        .and_then(|raw| session_key_from_credential(&raw))
+        .or_else(|| {
+            common::active_token_account(Provider::Claude)
+                .filter(|t| !is_oauth_access_token(t))
+                .and_then(|t| session_key_from_credential(&t))
+        })
+}
+
+/// Extract a `sessionKey` from either a full cookie header or a bare value.
+fn session_key_from_credential(raw: &str) -> Option<String> {
+    if let Some(value) = common::cookie_value(raw, "sessionKey") {
+        return (!value.is_empty()).then(|| value.to_string());
+    }
+    let trimmed = raw.trim();
+    (trimmed.starts_with("sk-ant-") && !trimmed.contains('=') && !trimmed.contains(';'))
+        .then(|| trimmed.to_string())
 }
 
 /// Get an OAuth access token for the Anthropic API.
@@ -610,34 +685,94 @@ pub async fn fetch_oauth(token: &str) -> Result<UsageSnapshot> {
     Ok(parse_oauth_usage_response(&data))
 }
 
-/// Fetch usage via web scraping.
-///
-/// This requires macOS with browser cookies available.
-///
-/// # Errors
-/// Returns an error if web scraping is not supported on the current platform
-/// or if the scraping operation fails.
-pub async fn fetch_web() -> Result<UsageSnapshot> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err(CautError::UnsupportedSource {
-            provider: "claude".to_string(),
-            source_type: "web".to_string(),
-        })
+/// claude.ai web API base URL.
+const WEB_API_BASE: &str = "https://claude.ai/api";
+
+/// One entry of `GET /api/organizations`.
+#[derive(Debug, Deserialize)]
+struct ClaudeWebOrganization {
+    uuid: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    capabilities: Vec<String>,
+}
+
+impl ClaudeWebOrganization {
+    fn has_capability(&self, wanted: &str) -> bool {
+        self.capabilities
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(wanted))
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        // TODO: Implement actual web scraping
-        // This would involve:
-        // 1. Reading browser cookies for claude.ai
-        // 2. Making authenticated request to the web dashboard
-        // 3. Parsing the response
-        Err(CautError::FetchFailed {
-            provider: "claude".to_string(),
-            reason: "Web scraping not yet implemented".to_string(),
-        })
+    /// An organization whose only capability is `api` (a Console org).
+    fn is_api_only(&self) -> bool {
+        !self.capabilities.is_empty()
+            && self
+                .capabilities
+                .iter()
+                .all(|c| c.eq_ignore_ascii_case("api"))
     }
+}
+
+/// Pick the organization whose usage the web UI shows: the first chat-capable
+/// one, else the first that is not API-only, else the first.
+fn select_web_organization(orgs: &[ClaudeWebOrganization]) -> Option<&ClaudeWebOrganization> {
+    orgs.iter()
+        .find(|o| o.has_capability("chat"))
+        .or_else(|| orgs.iter().find(|o| !o.is_api_only()))
+        .or_else(|| orgs.first())
+}
+
+/// `GET /api/account`: identity for the session.
+#[derive(Debug, Deserialize)]
+struct ClaudeWebAccount {
+    #[serde(default)]
+    email_address: Option<String>,
+}
+
+/// Fetch usage from the claude.ai web API with a `sessionKey` cookie.
+///
+/// Calls `GET /api/organizations` to find the chat organization, then
+/// `GET /api/organizations/{uuid}/usage`, which returns the same window shape
+/// as the OAuth usage endpoint. `GET /api/account` supplies the email; its
+/// failure only drops identity.
+///
+/// # Errors
+/// Returns an error if the session key is rejected, Cloudflare challenges the
+/// request, or a response cannot be parsed.
+pub async fn fetch_web(session_key: &str) -> Result<UsageSnapshot> {
+    let client = common::http_client()?;
+    let cookie = format!("sessionKey={session_key}");
+    let get = |path: &str| {
+        client
+            .get(format!("{WEB_API_BASE}{path}"))
+            .header("Cookie", cookie.clone())
+            .header("Accept", "application/json")
+    };
+
+    let orgs: Vec<ClaudeWebOrganization> =
+        common::send_json(Provider::Claude, get("/organizations")).await?;
+    let org = select_web_organization(&orgs).ok_or_else(|| {
+        common::fetch_failed(Provider::Claude, "claude.ai session has no organizations")
+    })?;
+
+    let usage: ClaudeOauthUsageResponse = common::send_json(
+        Provider::Claude,
+        get(&format!("/organizations/{}/usage", org.uuid)),
+    )
+    .await?;
+    let mut snapshot = parse_oauth_usage_response(&usage);
+
+    let account: Option<ClaudeWebAccount> = common::send_json(Provider::Claude, get("/account"))
+        .await
+        .ok();
+    snapshot.identity = Some(ProviderIdentity {
+        account_email: account.and_then(|a| a.email_address),
+        account_organization: org.name.clone(),
+        login_method: Some(SOURCE_WEB.to_string()),
+    });
+    Ok(snapshot)
 }
 
 /// Fetch usage via CLI PTY.
@@ -695,12 +830,9 @@ pub async fn fetch_cli() -> Result<UsageSnapshot> {
     // Note: Claude CLI doesn't expose rate limit info directly via CLI
     // Rate limit data needs to come from OAuth API or web dashboard
     Ok(UsageSnapshot {
-        primary: None,
-        secondary: None,
-        tertiary: None,
-        scoped: Vec::new(),
         updated_at: now,
         identity,
+        ..UsageSnapshot::empty()
     })
 }
 
@@ -814,6 +946,7 @@ fn parse_oauth_usage_response(response: &ClaudeOauthUsageResponse) -> UsageSnaps
         secondary,
         tertiary,
         scoped,
+        provider_cost: None,
         updated_at: now,
         identity: Some(local_identity_with_method("oauth")),
     }
@@ -857,6 +990,7 @@ fn parse_cli_limits_output(output: &str) -> UsageSnapshot {
         secondary,
         tertiary: None,
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: now,
         identity: Some(ProviderIdentity {
             account_email: None,
@@ -970,17 +1104,64 @@ mod tests {
     }
 
     #[test]
-    fn fetch_plan_web_availability_checks_os() {
+    fn selected_session_cookie_account_routes_to_web_only() {
         let plan = fetch_plan();
-        let web_strategy = &plan.strategies[1];
+        let ctx = FetchContext::with_account("work", "Cookie: foo=1; sessionKey=sk-ant-sid01-abc");
+        assert!(!(plan.strategies[0].is_available)(&ctx), "oauth");
+        assert!((plan.strategies[1].is_available)(&ctx), "web");
+        assert!(!(plan.strategies[2].is_available)(&ctx), "cli");
+        assert_eq!(session_key_for(&ctx).as_deref(), Some("sk-ant-sid01-abc"));
+    }
 
-        // On non-macOS, web should not be available
-        #[cfg(not(target_os = "macos"))]
-        assert!(!(web_strategy.is_available)());
+    #[test]
+    fn selected_oauth_account_routes_to_oauth_only() {
+        let plan = fetch_plan();
+        let ctx = FetchContext::with_account("work", "Bearer sk-ant-oat01-xyz");
+        assert!((plan.strategies[0].is_available)(&ctx), "oauth");
+        assert!(!(plan.strategies[1].is_available)(&ctx), "web");
+        assert!(!(plan.strategies[2].is_available)(&ctx), "cli");
+        assert_eq!(oauth_token_for(&ctx).as_deref(), Some("sk-ant-oat01-xyz"));
+    }
 
-        // On macOS, it should be available
-        #[cfg(target_os = "macos")]
-        assert!((web_strategy.is_available)());
+    #[test]
+    fn session_key_from_credential_accepts_bare_and_header_forms() {
+        assert_eq!(
+            session_key_from_credential("sk-ant-sid01-abc").as_deref(),
+            Some("sk-ant-sid01-abc")
+        );
+        assert_eq!(
+            session_key_from_credential("a=1; sessionKey=sk-ant-sid01-def").as_deref(),
+            Some("sk-ant-sid01-def")
+        );
+        assert_eq!(session_key_from_credential("a=1; b=2"), None);
+        assert_eq!(session_key_from_credential("random"), None);
+        assert_eq!(session_key_from_credential("sessionKey="), None);
+    }
+
+    #[test]
+    fn select_web_organization_prefers_chat_then_non_api() {
+        let orgs: Vec<ClaudeWebOrganization> = serde_json::from_str(
+            r#"[
+                {"uuid": "api-org", "name": "Console", "capabilities": ["api"]},
+                {"uuid": "chat-org", "name": "Personal", "capabilities": ["chat", "claude_pro"]}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(select_web_organization(&orgs).unwrap().uuid, "chat-org");
+
+        let orgs: Vec<ClaudeWebOrganization> = serde_json::from_str(
+            r#"[
+                {"uuid": "api-org", "capabilities": ["api"]},
+                {"uuid": "other", "capabilities": ["raven"]}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(select_web_organization(&orgs).unwrap().uuid, "other");
+
+        let orgs: Vec<ClaudeWebOrganization> =
+            serde_json::from_str(r#"[{"uuid": "only-api", "capabilities": ["api"]}]"#).unwrap();
+        assert_eq!(select_web_organization(&orgs).unwrap().uuid, "only-api");
+        assert!(select_web_organization(&[]).is_none());
     }
 
     #[test]

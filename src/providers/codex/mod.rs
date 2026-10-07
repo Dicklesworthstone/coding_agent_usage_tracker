@@ -18,7 +18,7 @@ use chrono::Utc;
 use serde::Deserialize;
 
 use crate::core::cli_runner::{CLI_TIMEOUT, run_command, run_json_command};
-use crate::core::fetch_plan::{FetchKind, FetchPlan, FetchStrategy};
+use crate::core::fetch_plan::{FetchContext, FetchKind, FetchPlan, FetchStrategy, ProviderFetch};
 use crate::core::models::{CreditsSnapshot, ProviderIdentity, RateWindow, UsageSnapshot};
 use crate::core::provider::Provider;
 use crate::error::{CautError, Result};
@@ -45,7 +45,7 @@ pub fn fetch_plan() -> FetchPlan {
             FetchStrategy {
                 id: "codex-web-dashboard",
                 kind: FetchKind::WebDashboard,
-                is_available: || {
+                is_available: |_| {
                     // Web dashboard requires macOS with cookies
                     cfg!(target_os = "macos")
                 },
@@ -54,11 +54,26 @@ pub fn fetch_plan() -> FetchPlan {
             FetchStrategy {
                 id: "codex-cli-rpc",
                 kind: FetchKind::Cli,
-                is_available: is_cli_available,
+                is_available: |_| is_cli_available(),
                 should_fallback: |_| false,
             },
         ],
     )
+}
+
+/// Run one strategy from [`fetch_plan`].
+///
+/// # Errors
+/// Returns the strategy's error, or an error for an unknown strategy id.
+pub async fn fetch(strategy_id: &str, _ctx: &FetchContext) -> Result<ProviderFetch> {
+    match strategy_id {
+        "codex-web-dashboard" => fetch_web_dashboard().await.map(ProviderFetch::from),
+        "codex-cli-rpc" => fetch_cli().await.map(ProviderFetch::from),
+        _ => Err(crate::providers::unknown_strategy(
+            Provider::Codex,
+            strategy_id,
+        )),
+    }
 }
 
 /// Check if the Codex CLI is available.
@@ -484,12 +499,9 @@ pub async fn fetch_cli() -> Result<UsageSnapshot> {
     // Return snapshot with identity info
     // Note: Rate limit data is not available via CLI - would need API access
     Ok(UsageSnapshot {
-        primary: None,
-        secondary: None,
-        tertiary: None,
-        scoped: Vec::new(),
         updated_at: now,
         identity,
+        ..UsageSnapshot::empty()
     })
 }
 
@@ -559,6 +571,7 @@ fn parse_rate_limit_response(
         secondary,
         tertiary: None,
         scoped: Vec::new(),
+        provider_cost: None,
         updated_at: now,
         identity,
     }
@@ -977,11 +990,11 @@ mod tests {
 
         // On non-macOS, web dashboard should not be available
         #[cfg(not(target_os = "macos"))]
-        assert!(!(web_strategy.is_available)());
+        assert!(!(web_strategy.is_available)(&FetchContext::default()));
 
         // On macOS, it should be available (regardless of cookies)
         #[cfg(target_os = "macos")]
-        assert!((web_strategy.is_available)());
+        assert!((web_strategy.is_available)(&FetchContext::default()));
     }
 
     #[test]

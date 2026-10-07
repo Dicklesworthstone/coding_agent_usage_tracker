@@ -483,8 +483,9 @@ pub fn provider_style(name: &str, theme: &ThemeConfig) -> Style {
 /// - Combined: `[bold red on white]`
 /// - Closing: `[/]`, `[/bold]`
 static MARKUP_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    // Pattern matches valid markup tags but not array indices like [0]
-    Regex::new(r"\[/?[a-zA-Z_#][a-zA-Z0-9_# (),]*\]").unwrap()
+    // Pattern matches valid markup tags (including the bare closing tag
+    // `[/]`) but not array indices like [0]
+    Regex::new(r"\[/\]|\[/?[a-zA-Z_#][a-zA-Z0-9_# (),]*\]").unwrap()
 });
 
 /// Regex for stripping ANSI escape sequences.
@@ -876,37 +877,70 @@ mod tests {
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    thread_local! {
+        /// Whether this thread already holds `ENV_LOCK`.
+        static ENV_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Run `f` while holding `ENV_LOCK`.
+    ///
+    /// Tests nest `with_env_var` / `without_env_var` to set several variables
+    /// at once; `Mutex` is not reentrant, so a nested call on the thread that
+    /// already holds the lock runs `f` directly instead of deadlocking. A
+    /// poisoned lock (a failed assertion in another test) is still usable.
+    fn with_env_lock(f: impl FnOnce()) {
+        struct ResetHeld;
+        impl Drop for ResetHeld {
+            fn drop(&mut self) {
+                ENV_LOCK_HELD.with(|held| held.set(false));
+            }
+        }
+
+        if ENV_LOCK_HELD.with(std::cell::Cell::get) {
+            f();
+            return;
+        }
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        ENV_LOCK_HELD.with(|held| held.set(true));
+        let _reset = ResetHeld;
+        f();
+    }
+
     #[allow(unsafe_code)]
     fn with_env_var(key: &str, value: &str, f: impl FnOnce()) {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let prior = std::env::var(key).ok();
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        f();
-        match prior {
-            Some(val) => unsafe {
-                std::env::set_var(key, val);
-            },
-            None => unsafe {
-                std::env::remove_var(key);
-            },
-        }
+        with_env_lock(|| {
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            f();
+            match prior {
+                Some(val) => unsafe {
+                    std::env::set_var(key, val);
+                },
+                None => unsafe {
+                    std::env::remove_var(key);
+                },
+            }
+        });
     }
 
     #[allow(unsafe_code)]
     fn without_env_var(key: &str, f: impl FnOnce()) {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let prior = std::env::var(key).ok();
-        unsafe {
-            std::env::remove_var(key);
-        }
-        f();
-        if let Some(val) = prior {
+        with_env_lock(|| {
+            let prior = std::env::var(key).ok();
             unsafe {
-                std::env::set_var(key, val);
+                std::env::remove_var(key);
             }
-        }
+            f();
+            if let Some(val) = prior {
+                unsafe {
+                    std::env::set_var(key, val);
+                }
+            }
+        });
     }
 
     // =========================================================================
@@ -1010,8 +1044,10 @@ mod tests {
     fn test_term_dumb_disables_rich() {
         // Note: This test may not trigger in CI because stdout isn't a TTY,
         // so the not_tty check fires first. Testing the logic directly.
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let original = std::env::var("TERM").ok();
-        let _guard = ENV_LOCK.lock().unwrap();
         #[allow(unsafe_code)]
         unsafe {
             std::env::set_var("TERM", "dumb");

@@ -8,7 +8,7 @@ use std::pin::Pin;
 
 use chrono::{DateTime, Utc};
 
-use super::models::UsageSnapshot;
+use super::models::{CreditsSnapshot, UsageSnapshot};
 use super::provider::Provider;
 use crate::error::Result;
 
@@ -28,9 +28,16 @@ pub enum SourceMode {
     Cli,
     /// OAuth API.
     OAuth,
+    /// Direct API with a token / API key.
+    Api,
+    /// Local files or a local probe (no network credentials).
+    Local,
 }
 
 impl SourceMode {
+    /// Every accepted `--source` value, for error messages.
+    pub const ARG_VALUES: &'static str = "auto, web, cli, oauth, api, local";
+
     /// Parse from CLI argument.
     #[must_use]
     pub fn from_arg(s: &str) -> Option<Self> {
@@ -39,8 +46,51 @@ impl SourceMode {
             "web" => Some(Self::Web),
             "cli" => Some(Self::Cli),
             "oauth" => Some(Self::OAuth),
+            "api" => Some(Self::Api),
+            "local" => Some(Self::Local),
             _ => None,
         }
+    }
+}
+
+// =============================================================================
+// Fetch Context
+// =============================================================================
+
+/// Per-fetch inputs that are not baked into a provider's strategy table.
+///
+/// The usage command builds one of these per provider (or per token account
+/// with `--all-accounts`) so a strategy can prefer an explicitly selected
+/// credential over whatever it would discover on its own.
+#[derive(Debug, Clone, Default)]
+pub struct FetchContext {
+    /// Credential from a selected token account: an API key, a cookie header,
+    /// or an OAuth access token, depending on the provider.
+    pub account_token: Option<String>,
+    /// Label of the selected token account, echoed into the payload.
+    pub account_label: Option<String>,
+    /// API base URL override from the config file (`providers.<name>.api_base`).
+    pub api_base: Option<String>,
+}
+
+impl FetchContext {
+    /// Context carrying a token-account credential.
+    #[must_use]
+    pub fn with_account(label: impl Into<String>, token: impl Into<String>) -> Self {
+        Self {
+            account_token: Some(token.into()),
+            account_label: Some(label.into()),
+            api_base: None,
+        }
+    }
+
+    /// The token-account credential, trimmed, if one was selected and is non-empty.
+    #[must_use]
+    pub fn account_token(&self) -> Option<&str> {
+        self.account_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
     }
 }
 
@@ -90,8 +140,8 @@ pub struct FetchStrategy {
     pub id: &'static str,
     /// Kind of fetch.
     pub kind: FetchKind,
-    /// Check if this strategy is available.
-    pub is_available: fn() -> bool,
+    /// Check if this strategy is available for the given context.
+    pub is_available: fn(&FetchContext) -> bool,
     /// Whether to fallback on error.
     pub should_fallback: fn(&crate::error::CautError) -> bool,
 }
@@ -121,6 +171,27 @@ pub struct FetchAttempt {
 }
 
 // =============================================================================
+// Provider Fetch Result
+// =============================================================================
+
+/// What one strategy run produced: the usage snapshot plus any data that
+/// does not belong on it, such as a Codex credit balance.
+#[derive(Debug, Clone)]
+pub struct ProviderFetch {
+    pub usage: UsageSnapshot,
+    pub credits: Option<CreditsSnapshot>,
+}
+
+impl From<UsageSnapshot> for ProviderFetch {
+    fn from(usage: UsageSnapshot) -> Self {
+        Self {
+            usage,
+            credits: None,
+        }
+    }
+}
+
+// =============================================================================
 // Fetch Outcome
 // =============================================================================
 
@@ -129,6 +200,8 @@ pub struct FetchAttempt {
 pub struct FetchOutcome {
     pub provider: Provider,
     pub result: Result<UsageSnapshot>,
+    /// Credit balance reported alongside the usage (Codex), if any.
+    pub credits: Option<CreditsSnapshot>,
     pub attempts: Vec<FetchAttempt>,
     pub source_label: String,
 }
@@ -145,9 +218,17 @@ impl FetchOutcome {
         Self {
             provider,
             result: Ok(snapshot),
+            credits: None,
             attempts,
             source_label: source.to_string(),
         }
+    }
+
+    /// Attach a credit balance to a successful outcome.
+    #[must_use]
+    pub fn with_credits(mut self, credits: Option<CreditsSnapshot>) -> Self {
+        self.credits = credits;
+        self
     }
 
     /// Create a failed outcome.
@@ -160,6 +241,7 @@ impl FetchOutcome {
         Self {
             provider,
             result: Err(error),
+            credits: None,
             attempts,
             source_label: String::new(),
         }
@@ -212,6 +294,16 @@ impl FetchPlan {
                 .strategies
                 .iter()
                 .filter(|s| s.kind == FetchKind::OAuth)
+                .collect(),
+            SourceMode::Api => self
+                .strategies
+                .iter()
+                .filter(|s| s.kind == FetchKind::ApiToken)
+                .collect(),
+            SourceMode::Local => self
+                .strategies
+                .iter()
+                .filter(|s| s.kind == FetchKind::LocalProbe)
                 .collect(),
         }
     }

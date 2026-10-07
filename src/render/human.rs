@@ -800,6 +800,7 @@ mod tests {
                 secondary: None,
                 tertiary: None,
                 scoped: Vec::new(),
+                provider_cost: None,
                 updated_at: chrono::Utc::now(),
                 identity: None,
             },
