@@ -112,23 +112,16 @@ mod dirs {
 mod tests {
     use super::AppPaths;
     use std::path::PathBuf;
-    #[cfg(target_os = "linux")]
-    use std::sync::{Mutex, OnceLock};
 
     #[cfg(target_os = "linux")]
-    use crate::test_utils::TestDir;
+    use crate::test_utils::{TestDir, lock_env};
 
-    // The env-mutation harness (ENV_LOCK, env_lock, EnvGuard) is only used by
-    // the two Linux-only XDG-override tests below. Gating the harness on the
-    // same cfg keeps macOS/Windows builds warning-clean under `-D warnings`.
-    #[cfg(target_os = "linux")]
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    #[cfg(target_os = "linux")]
-    fn env_lock() -> &'static Mutex<()> {
-        ENV_LOCK.get_or_init(|| Mutex::new(()))
-    }
-
+    // The env-mutation harness (EnvGuard) is only used by the two Linux-only
+    // XDG-override tests below. Gating the harness on the same cfg keeps
+    // macOS/Windows builds warning-clean under `-D warnings`. Those tests hold
+    // the process-wide `lock_env()`: `storage::config` tests resolve
+    // `config.toml` through `XDG_CONFIG_HOME`, so a module-local lock would
+    // not serialize them against these writes.
     #[cfg(target_os = "linux")]
     #[allow(unsafe_code)]
     struct EnvGuard {
@@ -226,7 +219,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn app_paths_respect_xdg_overrides() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _env = lock_env();
         let dir = TestDir::new();
 
         let config_home = dir.path().join("xdg-config");
@@ -249,7 +242,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn ensure_dirs_creates_expected_tree() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _env = lock_env();
         let dir = TestDir::new();
 
         let config_home = dir.path().join("xdg-config");

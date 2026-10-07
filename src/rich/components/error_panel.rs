@@ -279,7 +279,7 @@ mod tests {
         let theme = create_default_theme();
         let panel = ErrorPanel::new("Test error").with_suggestion("Try this");
         let segments = panel.render_segments(&theme);
-        assert!(!segments.is_empty());
+        assert_ne!(segments, [] as [Vec<Segment<'_>>; 0]);
     }
 
     #[test]

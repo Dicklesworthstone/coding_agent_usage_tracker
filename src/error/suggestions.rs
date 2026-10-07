@@ -565,14 +565,14 @@ mod tests {
     #[test]
     fn install_commands_for_known_clis() {
         let claude_cmds = install_commands_for_cli("claude");
-        assert!(!claude_cmds.is_empty());
+        assert_ne!(claude_cmds, [] as [String; 0]);
         assert!(claude_cmds.iter().any(|c| c.contains("npm install")));
 
         let codex_cmds = install_commands_for_cli("codex");
-        assert!(!codex_cmds.is_empty());
+        assert_ne!(codex_cmds, [] as [String; 0]);
 
         let unknown_cmds = install_commands_for_cli("unknown_tool");
-        assert!(!unknown_cmds.is_empty());
+        assert_ne!(unknown_cmds, [] as [String; 0]);
     }
 
     #[test]
@@ -587,7 +587,7 @@ mod tests {
     fn auth_suggestions_have_commands() {
         let suggestions = auth_expired_suggestions("claude");
         assert!(!suggestions.is_empty());
-        assert!(!suggestions[0].commands.is_empty());
+        assert_ne!(suggestions[0].commands, [] as [String; 0]);
         assert!(suggestions[0].commands.iter().any(|c| c.contains("claude")));
     }
 

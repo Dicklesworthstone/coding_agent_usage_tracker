@@ -5,6 +5,10 @@
 
 // Note: deny (not forbid) to allow #[allow(unsafe_code)] in test helpers for env var manipulation
 #![deny(unsafe_code)]
+// The usage pipeline dispatches to one async fetcher per provider, which makes
+// the `cli::serve` futures deep enough to overflow the default limit when the
+// compiler proves them `Send` (same limit as the binary crate in `main.rs`).
+#![recursion_limit = "256"]
 #![warn(clippy::pedantic, clippy::nursery)]
 #![allow(clippy::module_name_repetitions)]
 // Allow async functions without await - stub functions will use async when implemented.

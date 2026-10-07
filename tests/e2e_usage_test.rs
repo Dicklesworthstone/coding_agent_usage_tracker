@@ -18,7 +18,7 @@ use caut::storage::config::{
 use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 use tempfile::TempDir;
 
 mod common;
@@ -39,7 +39,8 @@ struct EnvGuard {
 impl EnvGuard {
     #[allow(unsafe_code)]
     fn set(vars: &[(&str, Option<&str>)]) -> Self {
-        let lock = ENV_LOCK.lock().expect("env lock");
+        // A failed assertion in the other env test must not poison this one.
+        let lock = ENV_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let mut prior = Vec::new();
 
         for (key, value) in vars {
@@ -111,20 +112,33 @@ const fn make_test_usage_args() -> UsageArgs {
 // =============================================================================
 
 /// Get the caut binary command.
+///
+/// The child never inherits the `CAUT_*` config overrides. The in-process
+/// `resolved_config_*` tests set them on this test process (under `ENV_LOCK`)
+/// while other tests spawn `caut` concurrently; an inherited `CAUT_CONFIG` or
+/// `CAUT_FORMAT` would silently change those children's behavior.
 #[allow(deprecated)]
 fn caut_cmd() -> Command {
     // Try standard cargo_bin first
-    if let Ok(cmd) = Command::cargo_bin("caut") {
-        return cmd;
-    }
+    let mut cmd = Command::cargo_bin("caut").unwrap_or_else(|_| {
+        // Fallback to hardcoded path seen in environment
+        let path = PathBuf::from("/tmp/cargo-target/debug/caut");
+        assert!(path.exists(), "Could not find caut binary");
+        Command::new(path)
+    });
 
-    // Fallback to hardcoded path seen in environment
-    let path = PathBuf::from("/tmp/cargo-target/debug/caut");
-    if path.exists() {
-        return Command::new(path);
+    for key in [
+        ENV_CONFIG,
+        ENV_PROVIDERS,
+        ENV_FORMAT,
+        ENV_TIMEOUT,
+        ENV_NO_COLOR,
+        ENV_VERBOSE,
+        ENV_PRETTY,
+    ] {
+        cmd.env_remove(key);
     }
-
-    panic!("Could not find caut binary");
+    cmd
 }
 
 /// Setup a test environment with a temporary directory.
