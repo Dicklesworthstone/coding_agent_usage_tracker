@@ -8,6 +8,7 @@ pub mod prompt;
 pub mod query;
 pub mod serve;
 pub mod session;
+pub mod token_accounts;
 pub mod usage;
 pub mod watch;
 

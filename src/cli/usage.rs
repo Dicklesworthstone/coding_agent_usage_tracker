@@ -4,14 +4,56 @@ use crate::cli::args::{OutputFormat, UsageArgs};
 use crate::cli::prompt::{ProviderPromptData, update_cache as update_prompt_cache};
 use crate::cli::watch;
 use crate::core::credential_health::AuthHealthAggregator;
+use crate::core::fetch_plan::FetchContext;
 use crate::core::models::{ProviderPayload, RobotOutput};
-use crate::core::pipeline::fetch_providers_with_timeout;
-use crate::core::provider::ProviderSelection;
+use crate::core::pipeline::{FetchRequest, fetch_requests};
+use crate::core::provider::{Provider, ProviderSelection};
 use crate::core::status::StatusFetcher;
 use crate::error::{CautError, Result};
 use crate::render::{human, robot};
+use crate::storage::token_accounts::{AccountSelection, TokenAccountStore};
 use crate::storage::{AppPaths, HistoryStore, RetentionPolicy};
 use tokio::time::Duration;
+
+/// Turn providers plus an account selection into fetch requests.
+///
+/// Without a selection every provider is fetched once with its locally
+/// discovered credentials. A selection (`--account`, `--account-index`,
+/// `--all-accounts`) needs exactly one provider that supports token accounts
+/// and yields one request per chosen account, as in `CodexBar`.
+///
+/// # Errors
+/// Returns an error for a selection over several providers, a provider
+/// without token-account support, or a selection that matches nothing.
+fn build_requests(
+    providers: &[Provider],
+    selection: &AccountSelection,
+    load_store: impl FnOnce() -> Result<TokenAccountStore>,
+) -> Result<Vec<FetchRequest>> {
+    if !selection.is_explicit() {
+        return Ok(providers.iter().map(|&p| FetchRequest::new(p)).collect());
+    }
+    let [provider] = providers else {
+        return Err(CautError::Config(
+            "Account selection (--account, --account-index, --all-accounts) needs a single provider: add --provider <name>".to_string(),
+        ));
+    };
+    if !provider.supports_token_accounts() {
+        return Err(CautError::Config(format!(
+            "{} does not support token accounts",
+            provider.display_name()
+        )));
+    }
+    let store = load_store()?;
+    let accounts = store.resolve(*provider, selection)?;
+    Ok(accounts
+        .into_iter()
+        .map(|account| FetchRequest {
+            provider: *provider,
+            ctx: FetchContext::with_account(account.label.clone(), account.token.clone()),
+        })
+        .collect())
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct UsageResults {
@@ -88,9 +130,18 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
 
     tracing::debug!(?providers, ?source_mode, "Starting usage fetch");
 
+    let account_selection = AccountSelection {
+        label: args.account.clone(),
+        index: args.account_index.map(|i| i.saturating_sub(1)),
+        all: args.all_accounts,
+    };
+    let requests = build_requests(&providers, &account_selection, || {
+        TokenAccountStore::load(&AppPaths::new().token_accounts_file())
+    })?;
+
     // Fetch usage data from providers
     let timeout_override = args.effective_timeout_override().map(Duration::from_secs);
-    let outcomes = fetch_providers_with_timeout(&providers, source_mode, timeout_override).await;
+    let outcomes = fetch_requests(&requests, source_mode, timeout_override).await;
 
     // Optionally fetch status
     let status_fetcher = if args.status {
@@ -106,7 +157,8 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
     let paths = AppPaths::new();
     let auth_checker = AuthHealthAggregator::new();
 
-    for outcome in outcomes {
+    for (request, outcome) in requests.iter().zip(outcomes) {
+        let account_label = request.ctx.account_label.clone();
         match outcome.result {
             Ok(snapshot) => {
                 // Record to history
@@ -133,10 +185,14 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
 
                 let payload = ProviderPayload {
                     provider: outcome.provider.cli_name().to_string(),
-                    account: snapshot
-                        .identity
-                        .as_ref()
-                        .and_then(|i| i.account_email.clone()),
+                    // A selected token account is named by its label, so
+                    // `--all-accounts` rows stay distinguishable.
+                    account: account_label.or_else(|| {
+                        snapshot
+                            .identity
+                            .as_ref()
+                            .and_then(|i| i.account_email.clone())
+                    }),
                     version: None, // TODO: Get from CLI version
                     source: outcome.source_label,
                     status,
@@ -149,7 +205,11 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
                 payloads.push(payload);
             }
             Err(e) => {
-                errors.push(format!("{}: {}", outcome.provider.cli_name(), e));
+                let name = account_label.map_or_else(
+                    || outcome.provider.cli_name().to_string(),
+                    |label| format!("{} [{label}]", outcome.provider.cli_name()),
+                );
+                errors.push(format!("{name}: {e}"));
             }
         }
     }
@@ -213,4 +273,107 @@ pub(crate) fn render_usage_results(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::token_accounts::TokenAccount;
+
+    fn store_with_zai_accounts() -> Result<TokenAccountStore> {
+        let mut store = TokenAccountStore::empty();
+        store.add(Provider::Zai, TokenAccount::new("personal", "tok-1"))?;
+        store.add(Provider::Zai, TokenAccount::new("team", "tok-2"))?;
+        Ok(store)
+    }
+
+    #[test]
+    fn no_selection_fetches_each_provider_once_without_loading_accounts() {
+        let requests = build_requests(
+            &[Provider::Codex, Provider::Claude],
+            &AccountSelection::default(),
+            || panic!("the store must not be loaded without a selection"),
+        )
+        .unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(|r| r.ctx.account_token().is_none()));
+    }
+
+    #[test]
+    fn all_accounts_yields_one_request_per_account() {
+        let selection = AccountSelection {
+            all: true,
+            ..Default::default()
+        };
+        let requests =
+            build_requests(&[Provider::Zai], &selection, store_with_zai_accounts).unwrap();
+        let labels: Vec<_> = requests
+            .iter()
+            .map(|r| r.ctx.account_label.as_deref().unwrap())
+            .collect();
+        assert_eq!(labels, ["personal", "team"]);
+        assert_eq!(requests[1].ctx.account_token(), Some("tok-2"));
+    }
+
+    #[test]
+    fn label_and_index_select_one_account() {
+        let by_label = AccountSelection {
+            label: Some("TEAM".into()),
+            ..Default::default()
+        };
+        let requests =
+            build_requests(&[Provider::Zai], &by_label, store_with_zai_accounts).unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].ctx.account_token(), Some("tok-2"));
+
+        let by_index = AccountSelection {
+            index: Some(0),
+            ..Default::default()
+        };
+        let requests =
+            build_requests(&[Provider::Zai], &by_index, store_with_zai_accounts).unwrap();
+        assert_eq!(requests[0].ctx.account_token(), Some("tok-1"));
+    }
+
+    #[test]
+    fn selection_needs_one_supporting_provider() {
+        let selection = AccountSelection {
+            all: true,
+            ..Default::default()
+        };
+        let err = build_requests(
+            &[Provider::Codex, Provider::Claude],
+            &selection,
+            store_with_zai_accounts,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("single provider"));
+
+        let err = build_requests(
+            &[Provider::JetBrainsAI],
+            &selection,
+            store_with_zai_accounts,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("does not support token accounts"));
+    }
+
+    #[test]
+    fn selection_errors_propagate_from_the_store() {
+        let selection = AccountSelection {
+            label: Some("missing".into()),
+            ..Default::default()
+        };
+        assert!(build_requests(&[Provider::Zai], &selection, store_with_zai_accounts).is_err());
+        let selection = AccountSelection {
+            all: true,
+            ..Default::default()
+        };
+        assert!(
+            build_requests(&[Provider::Zai], &selection, || Ok(
+                TokenAccountStore::empty()
+            ))
+            .is_err()
+        );
+    }
 }

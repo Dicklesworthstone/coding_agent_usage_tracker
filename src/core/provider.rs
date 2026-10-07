@@ -133,14 +133,21 @@ impl Provider {
     /// Whether this provider supports token accounts.
     #[must_use]
     pub const fn supports_token_accounts(self) -> bool {
+        // Providers whose strategies take a credential from the selected
+        // token account (API key, cookie header or bearer token).
         matches!(
             self,
-            Self::Claude
+            Self::Codex
+                | Self::Claude
                 | Self::Zai
                 | Self::Cursor
                 | Self::OpenCode
                 | Self::Factory
                 | Self::MiniMax
+                | Self::Kimi
+                | Self::KimiK2
+                | Self::Copilot
+                | Self::Amp
         )
     }
 

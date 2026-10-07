@@ -231,7 +231,7 @@ pub struct UsageArgs {
     #[arg(long)]
     pub status: bool,
 
-    /// Data source (auto, web, cli, oauth)
+    /// Data source (auto, web, cli, oauth, api, local)
     #[arg(long, value_name = "SOURCE")]
     pub source: Option<String>,
 
@@ -277,6 +277,21 @@ impl UsageArgs {
         // --all-accounts conflicts with --account and --account-index
         if self.all_accounts && (self.account.is_some() || self.account_index.is_some()) {
             return Err(CautError::AllAccountsConflict);
+        }
+
+        if self.account_index == Some(0) {
+            return Err(CautError::Config(
+                "--account-index is 1-based; use 1 for the first account".to_string(),
+            ));
+        }
+
+        if let Some(source) = self.source.as_deref()
+            && crate::core::fetch_plan::SourceMode::from_arg(source).is_none()
+        {
+            return Err(CautError::Config(format!(
+                "Unknown --source '{source}'. Valid values: {}",
+                crate::core::fetch_plan::SourceMode::ARG_VALUES
+            )));
         }
 
         if self.timeout == Some(0) {
@@ -387,7 +402,7 @@ pub struct DashboardArgs {
     #[arg(long, value_name = "PROVIDER")]
     pub provider: Option<String>,
 
-    /// Data source (auto, web, cli, oauth)
+    /// Data source (auto, web, cli, oauth, api, local)
     #[arg(long, value_name = "SOURCE")]
     pub source: Option<String>,
 
@@ -440,7 +455,7 @@ pub struct ServeArgs {
     #[arg(long, value_name = "PROVIDER")]
     pub provider: Option<String>,
 
-    /// Data source (auto, web, cli, oauth)
+    /// Data source (auto, web, cli, oauth, api, local)
     #[arg(long, value_name = "SOURCE")]
     pub source: Option<String>,
 
@@ -552,6 +567,48 @@ pub enum TokenAccountsCommand {
         /// Provider to list accounts for
         #[arg(long)]
         provider: Option<String>,
+    },
+
+    /// Add an account (an API key, cookie header or OAuth token)
+    Add {
+        /// Provider the credential belongs to
+        #[arg(long)]
+        provider: String,
+
+        /// Label used to select the account with `usage --account`
+        #[arg(long)]
+        label: String,
+
+        /// The credential. Omit to read it from stdin, which keeps it out of
+        /// shell history.
+        #[arg(long)]
+        token: Option<String>,
+
+        /// Make this the provider's active account
+        #[arg(long)]
+        activate: bool,
+    },
+
+    /// Remove an account
+    Remove {
+        /// Provider the account belongs to
+        #[arg(long)]
+        provider: String,
+
+        /// Label of the account to remove
+        #[arg(long)]
+        label: String,
+    },
+
+    /// Make an account the provider's active (default) account
+    Use {
+        /// Provider the account belongs to
+        #[arg(long)]
+        provider: String,
+
+        /// Label of the account to activate
+        #[arg(long)]
+        label: String,
     },
 
     /// Convert between `CodexBar` and caut formats
