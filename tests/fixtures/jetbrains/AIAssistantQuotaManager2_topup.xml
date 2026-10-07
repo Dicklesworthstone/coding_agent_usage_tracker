@@ -1,0 +1,5 @@
+<application>
+  <component name="AIAssistantQuotaManager2">
+    <option name="quotaInfo" value="{&#10;  &quot;type&quot;: &quot;Available&quot;,&#10;  &quot;current&quot;: &quot;346000&quot;,&#10;  &quot;maximum&quot;: &quot;6489986.397&quot;,&#10;  &quot;tariffQuota&quot;: {&#10;    &quot;current&quot;: &quot;346000&quot;,&#10;    &quot;maximum&quot;: &quot;1000000&quot;,&#10;    &quot;available&quot;: &quot;654000&quot;&#10;  },&#10;  &quot;topUpQuota&quot;: {&#10;    &quot;current&quot;: &quot;0&quot;,&#10;    &quot;maximum&quot;: &quot;5489986.397&quot;,&#10;    &quot;available&quot;: &quot;5489986.397&quot;&#10;  }&#10;}" />
+  </component>
+</application>
