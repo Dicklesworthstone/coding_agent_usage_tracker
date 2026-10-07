@@ -95,6 +95,25 @@ pub enum Commands {
 
     /// Query a running caut server and print JSON to stdout
     Query(QueryArgs),
+
+    /// Inspect or create the config file
+    #[command(subcommand)]
+    Config(ConfigCommand),
+}
+
+/// Config subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ConfigCommand {
+    /// Print the config file path
+    Path,
+    /// Print the effective configuration (file contents merged with defaults)
+    Show,
+    /// Write a commented starter config file
+    Init {
+        /// Overwrite an existing config file
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// History subcommands.

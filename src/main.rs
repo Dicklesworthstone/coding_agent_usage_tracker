@@ -120,6 +120,8 @@ async fn run(cli: Cli) -> caut::Result<()> {
         Some(Commands::Serve(args)) => caut::cli::serve::execute(&args).await,
 
         Some(Commands::Query(args)) => caut::cli::query::execute(&args, pretty).await,
+
+        Some(Commands::Config(cmd)) => caut::cli::config::execute(&cmd, format, pretty),
     }
 }
 
