@@ -2,8 +2,12 @@
 //!
 //! Renders usage and cost data with styled panels, tables, and progress bars.
 
-use crate::core::models::{CostPayload, ProviderPayload, RateWindow, StatusIndicator};
+use crate::core::models::{
+    CostPayload, ProviderCostSnapshot, ProviderPayload, RateWindow, StatusIndicator,
+};
+use crate::core::provider::Provider;
 use crate::error::Result;
+use crate::util::time::format_countdown;
 use rich_rust::prelude::*;
 use rich_rust::{Color, ColorSystem, Segment, Style};
 use std::fmt::Write;
@@ -67,24 +71,26 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
         None
     };
     let mut content_lines: Vec<Vec<Segment>> = Vec::new();
+    let provider = Provider::from_cli_name(&payload.provider).ok();
 
     // Primary window
     if let Some(primary) = &payload.usage.primary {
-        content_lines.push(format_rate_window_segments("Session", primary, no_color));
+        let label = provider.map_or("Session", Provider::session_label);
+        content_lines.push(format_rate_window_segments(label, primary, no_color));
     }
 
     // Secondary window
     if let Some(secondary) = &payload.usage.secondary {
-        content_lines.push(format_rate_window_segments("Weekly", secondary, no_color));
+        let label = provider.map_or("Weekly", Provider::weekly_label);
+        content_lines.push(format_rate_window_segments(label, secondary, no_color));
     }
 
-    // Tertiary window (Opus/Sonnet)
+    // Tertiary window (Claude's Opus/Sonnet tier, Gemini Flash Lite, ...)
     if let Some(tertiary) = &payload.usage.tertiary {
-        content_lines.push(format_rate_window_segments(
-            "Opus/Sonnet",
-            tertiary,
-            no_color,
-        ));
+        let label = provider
+            .and_then(Provider::tertiary_label)
+            .unwrap_or("Tier 3");
+        content_lines.push(format_rate_window_segments(label, tertiary, no_color));
     }
 
     // Model-scoped quotas (Claude's weekly Fable/Opus allowances), worst
@@ -105,19 +111,20 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
     // commands on Linux, so CLI strategies can only populate identity
     // (see #7). The truly-empty case ("No usage data available") is still
     // handled by the fallback below.
-    let has_any_rate_window = payload.usage.primary.is_some()
-        || payload.usage.secondary.is_some()
-        || payload.usage.tertiary.is_some()
-        || !payload.usage.scoped.is_empty();
     let has_any_ancillary =
         payload.credits.is_some() || payload.usage.identity.is_some() || payload.status.is_some();
-    if !has_any_rate_window && has_any_ancillary {
+    if !payload.usage.has_quota() && has_any_ancillary {
         content_lines.insert(
             0,
             vec![Segment::plain(
                 "Rate limits: not available via this source (identity only)".to_string(),
             )],
         );
+    }
+
+    // Money / credit budget (Cursor on-demand, Codex monthly cap, Amp, ...)
+    if let Some(cost) = &payload.usage.provider_cost {
+        content_lines.push(vec![Segment::plain(format_provider_cost(cost))]);
     }
 
     // Credits
@@ -128,11 +135,9 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
         ))]);
     }
 
-    // Identity
-    if let Some(identity) = &payload.usage.identity
-        && let Some(email) = &identity.account_email
-    {
-        content_lines.push(vec![Segment::plain(format!("Account: {email}"))]);
+    // Identity: account and plan
+    for line in identity_lines(payload) {
+        content_lines.push(vec![Segment::plain(line)]);
     }
 
     // Status
@@ -160,8 +165,7 @@ fn render_provider_usage(payload: &ProviderPayload, no_color: bool) -> String {
     }
 
     // Build panel title with styling
-    let version = payload.version.as_deref().unwrap_or("");
-    let title_text = format!("{} {} ({})", payload.provider, version, payload.source);
+    let title_text = panel_title(payload, provider);
     let title = if no_color {
         Text::new(&title_text)
     } else {
@@ -198,10 +202,7 @@ fn format_rate_window_segments<'a>(
     no_color: bool,
 ) -> Vec<Segment<'a>> {
     let remaining = window.remaining_percent();
-    let reset = window
-        .reset_description
-        .as_deref()
-        .unwrap_or("unknown reset");
+    let reset = reset_text(window);
 
     let mut segments = Vec::new();
 
@@ -231,12 +232,128 @@ fn format_rate_window_segments<'a>(
         .show_percentage(false);
     bar.set_progress(remaining / 100.0);
 
-    segments.extend(bar.render(16));
+    // The bar renders as a full line; drop its line break so the reset text
+    // stays inside the panel row.
+    segments.extend(
+        bar.render(16)
+            .into_iter()
+            .filter(|segment| !segment.text.chars().all(|c| c == '\n' || c == '\r')),
+    );
 
     // Reset info
     segments.push(Segment::plain(format!(" {reset}")));
 
     segments
+}
+
+/// Panel title: `<Display name> [version] (<source>)`.
+fn panel_title(payload: &ProviderPayload, provider: Option<Provider>) -> String {
+    let name: &str = match provider {
+        Some(p) => p.display_name(),
+        None => &payload.provider,
+    };
+    payload
+        .version
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .map_or_else(
+            || format!("{name} ({})", payload.source),
+            |version| format!("{name} {version} ({})", payload.source),
+        )
+}
+
+/// `Account:` (token-account label and/or email) and `Plan:` lines.
+fn identity_lines(payload: &ProviderPayload) -> Vec<String> {
+    let identity = payload.usage.identity.as_ref();
+    let email = identity.and_then(|i| i.account_email.as_deref());
+    let account = match (payload.account.as_deref(), email) {
+        (Some(account), Some(email)) if account != email => Some(format!("{account} ({email})")),
+        (_, Some(email)) => Some(email.to_string()),
+        (Some(account), None) => Some(account.to_string()),
+        (None, None) => None,
+    };
+    let plan = identity
+        .and_then(|i| i.login_method.as_deref())
+        .filter(|plan| is_plan_name(plan));
+    account
+        .map(|a| format!("Account: {a}"))
+        .into_iter()
+        .chain(plan.map(|p| format!("Plan: {p}")))
+        .collect()
+}
+
+/// The reset text for a window: the provider's own description, else a
+/// countdown to `resets_at`.
+fn reset_text(window: &RateWindow) -> String {
+    if let Some(description) = window.reset_description.as_deref() {
+        return description.to_string();
+    }
+    window.resets_at.map_or_else(
+        || "unknown reset".to_string(),
+        |at| format!("resets {}", format_countdown(at)),
+    )
+}
+
+/// An amount in the snapshot's currency: `$12.30` for USD, `12.3 credits`
+/// for provider credit units.
+fn format_amount(amount: f64, currency_code: &str) -> String {
+    match currency_code.to_ascii_uppercase().as_str() {
+        "USD" => format!("${amount:.2}"),
+        "EUR" => format!("€{amount:.2}"),
+        "GBP" => format!("£{amount:.2}"),
+        _ => {
+            let unit = currency_code.to_lowercase();
+            if amount.fract().abs() < f64::EPSILON {
+                format!("{amount:.0} {unit}")
+            } else {
+                format!("{amount:.1} {unit}")
+            }
+        }
+    }
+}
+
+/// One line for a money or credit budget, e.g.
+/// `Spend (Monthly): $12.30 / $20.00 (62%) · resets in 3 days`.
+fn format_provider_cost(cost: &ProviderCostSnapshot) -> String {
+    let label = cost
+        .period
+        .as_deref()
+        .map_or_else(|| "Spend".to_string(), |p| format!("Spend ({p})"));
+    let mut line = if cost.limit > 0.0 {
+        format!(
+            "{label}: {} / {}",
+            format_amount(cost.used, &cost.currency_code),
+            format_amount(cost.limit, &cost.currency_code)
+        )
+    } else {
+        format!("{label}: {}", format_amount(cost.used, &cost.currency_code))
+    };
+    if let Some(percent) = cost.used_percent() {
+        let _ = write!(line, " ({percent:.0}%)");
+    }
+    if let Some(resets_at) = cost.resets_at {
+        let _ = write!(line, " · resets {}", format_countdown(resets_at));
+    }
+    line
+}
+
+/// Whether an identity's `login_method` names a plan rather than the
+/// mechanism caut used to log in.
+fn is_plan_name(value: &str) -> bool {
+    const MECHANISMS: &[&str] = &[
+        "oauth",
+        "oauth-partial",
+        "web",
+        "cli",
+        "cli-local",
+        "api",
+        "api-key",
+        "apikey",
+        "local",
+        "fixture",
+    ];
+    let trimmed = value.trim();
+    !trimmed.is_empty() && !MECHANISMS.iter().any(|m| trimmed.eq_ignore_ascii_case(m))
 }
 
 /// Format status as styled segments.
@@ -659,6 +776,105 @@ mod tests {
     use crate::{assert_ansi_codes, assert_contains, assert_no_ansi_codes, assert_not_contains};
 
     // =========================================================================
+    // Provider-aware rendering
+    // =========================================================================
+
+    #[test]
+    fn rows_stay_inside_the_panel() {
+        let result = render_usage(&[make_test_provider_payload("codex", "oauth")], true).unwrap();
+        for line in result.lines().filter(|l| !l.trim().is_empty()) {
+            let first = line.chars().next().unwrap();
+            assert!(
+                matches!(first, '│' | '╭' | '╰'),
+                "row escaped the panel border: {line:?}\n{result}"
+            );
+        }
+    }
+
+    #[test]
+    fn uses_provider_window_labels_and_display_name() {
+        let mut payload = make_test_provider_payload_minimal("copilot", "api");
+        payload.usage.secondary = Some(make_test_rate_window(10.0));
+        let result = render_usage(&[payload], true).unwrap();
+        assert_contains!(&result, "Copilot (api)");
+        assert_contains!(&result, "Premium:");
+        assert_contains!(&result, "Chat:");
+        assert_not_contains!(&result, "Session:");
+    }
+
+    #[test]
+    fn reset_countdown_comes_from_resets_at() {
+        let window = RateWindow {
+            used_percent: 10.0,
+            window_minutes: Some(300),
+            resets_at: Some(chrono::Utc::now() + chrono::Duration::minutes(90)),
+            reset_description: None,
+        };
+        let text = reset_text(&window);
+        assert!(text.starts_with("resets in 1h"), "{text}");
+        assert_eq!(reset_text(&RateWindow::new(5.0)), "unknown reset");
+    }
+
+    #[test]
+    fn provider_cost_line_formats_currency_and_credits() {
+        let now = chrono::Utc::now();
+        let usd = ProviderCostSnapshot {
+            used: 12.3,
+            limit: 20.0,
+            currency_code: "USD".into(),
+            period: Some("Monthly".into()),
+            resets_at: None,
+            updated_at: now,
+        };
+        assert_eq!(
+            format_provider_cost(&usd),
+            "Spend (Monthly): $12.30 / $20.00 (62%)"
+        );
+        let credits = ProviderCostSnapshot {
+            used: 250.0,
+            limit: 0.0,
+            currency_code: "credits".into(),
+            period: None,
+            resets_at: Some(now + chrono::Duration::hours(30)),
+            updated_at: now,
+        };
+        let line = format_provider_cost(&credits);
+        assert!(line.starts_with("Spend: 250 credits · resets in"), "{line}");
+    }
+
+    #[test]
+    fn renders_cost_plan_and_account_label() {
+        let mut payload = make_test_provider_payload_minimal("cursor", "web");
+        payload.account = Some("work".into());
+        payload.usage.identity = Some(crate::core::models::ProviderIdentity {
+            account_email: Some("dev@example.com".into()),
+            account_organization: None,
+            login_method: Some("Pro".into()),
+        });
+        payload.usage.provider_cost = Some(ProviderCostSnapshot {
+            used: 5.0,
+            limit: 10.0,
+            currency_code: "USD".into(),
+            period: None,
+            resets_at: None,
+            updated_at: chrono::Utc::now(),
+        });
+        let result = render_usage(&[payload], true).unwrap();
+        assert_contains!(&result, "Spend: $5.00 / $10.00 (50%)");
+        assert_contains!(&result, "Account: work (dev@example.com)");
+        assert_contains!(&result, "Plan: Pro");
+    }
+
+    #[test]
+    fn login_mechanisms_are_not_plans() {
+        assert!(is_plan_name("pro"));
+        assert!(is_plan_name("Claude Max"));
+        assert!(!is_plan_name("oauth"));
+        assert!(!is_plan_name("CLI"));
+        assert!(!is_plan_name(" "));
+    }
+
+    // =========================================================================
     // render_usage() Tests
     // =========================================================================
 
@@ -667,7 +883,7 @@ mod tests {
         let payload = make_test_provider_payload("codex", "cli");
         let result = render_usage(&[payload], false).unwrap();
 
-        assert_contains!(&result, "codex");
+        assert_contains!(&result, "Codex");
         assert_contains!(&result, "(cli)");
         assert_contains!(&result, "Session");
     }
@@ -681,8 +897,8 @@ mod tests {
 
         let result = render_usage(&payloads, false).unwrap();
 
-        assert_contains!(&result, "codex");
-        assert_contains!(&result, "claude");
+        assert_contains!(&result, "Codex");
+        assert_contains!(&result, "Claude");
     }
 
     #[test]
@@ -1126,8 +1342,8 @@ mod tests {
         let stripped = crate::test_utils::strip_ansi_codes(&with_color);
 
         // Core content should be the same
-        assert!(without_color.contains("codex"));
-        assert!(stripped.contains("codex"));
+        assert!(without_color.contains("Codex"));
+        assert!(stripped.contains("Codex"));
     }
 
     #[test]

@@ -6,6 +6,7 @@
 mod common;
 
 use caut::core::models::{CostPayload, ProviderPayload, RobotOutput};
+use caut::core::provider::Provider;
 use caut::render::{human, robot};
 use caut::test_utils::{
     make_test_cost_payload, make_test_cost_payload_minimal, make_test_provider_payload,
@@ -35,7 +36,11 @@ fn usage_pipeline_single_provider_to_human_output() {
 
     log.phase("verify");
     // Stage 3: Verify output contains expected data
-    assert_contains!(&human_output, provider);
+    // Human panels are titled with the display name ("Codex"), not the CLI id.
+    let display_name = Provider::from_cli_name(provider)
+        .expect("known provider")
+        .display_name();
+    assert_contains!(&human_output, display_name);
     assert_contains!(&human_output, source);
     assert_contains!(&human_output, "Session");
     assert_contains!(&human_output, "Credits:");
@@ -107,9 +112,9 @@ fn usage_pipeline_multi_provider_aggregation() {
         human::render_usage(&providers, false).expect("Multi-provider human render should succeed");
 
     log.phase("verify_human");
-    assert_contains!(&human_output, "codex");
-    assert_contains!(&human_output, "claude");
-    assert_contains!(&human_output, "gemini");
+    assert_contains!(&human_output, "Codex");
+    assert_contains!(&human_output, "Claude");
+    assert_contains!(&human_output, "Gemini");
 
     log.phase("render_robot");
     let json_output = robot::render_usage_json(&providers, false)
@@ -462,8 +467,8 @@ fn same_data_renders_consistently() {
         .expect("Markdown render should succeed");
 
     log.phase("verify");
-    // All formats should contain the provider name
-    assert_contains!(&human_output, "codex");
+    // All formats should contain the provider name (display name for humans)
+    assert_contains!(&human_output, "Codex");
     assert_contains!(&json_output, "codex");
     assert_contains!(&md_output, "codex");
     log.finish_ok();

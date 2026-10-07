@@ -3,6 +3,7 @@
 //! Provides stable, token-efficient output for AI agents.
 
 use crate::core::models::{CostPayload, ProviderPayload, RobotOutput};
+use crate::core::provider::Provider;
 use crate::error::Result;
 use std::fmt::Write;
 
@@ -74,6 +75,47 @@ pub fn render_usage_md(results: &[ProviderPayload]) -> Result<String> {
             if let Some(resets_at) = &secondary.resets_at {
                 let _ = writeln!(output, "- resets_weekly: {resets_at}");
             }
+        }
+
+        if let Some(tertiary) = &payload.usage.tertiary {
+            let label = Provider::from_cli_name(&payload.provider)
+                .ok()
+                .and_then(Provider::tertiary_label)
+                .unwrap_or("tertiary");
+            let _ = writeln!(
+                output,
+                "- tertiary_left[{label}]: {:.0}%",
+                tertiary.remaining_percent()
+            );
+            if let Some(resets_at) = &tertiary.resets_at {
+                let _ = writeln!(output, "- resets_tertiary: {resets_at}");
+            }
+        }
+
+        if let Some(cost) = &payload.usage.provider_cost {
+            let mut line = format!("- cost_used: {:.2} {}", cost.used, cost.currency_code);
+            if cost.limit > 0.0 {
+                let _ = write!(line, " of {:.2}", cost.limit);
+            }
+            if let Some(period) = &cost.period {
+                let _ = write!(line, " ({period})");
+            }
+            let _ = writeln!(output, "{line}");
+            if let Some(resets_at) = &cost.resets_at {
+                let _ = writeln!(output, "- resets_cost: {resets_at}");
+            }
+        }
+
+        if let Some(account) = &payload.account {
+            let _ = writeln!(output, "- account: {account}");
+        }
+        if let Some(plan) = payload
+            .usage
+            .identity
+            .as_ref()
+            .and_then(|i| i.login_method.as_deref())
+        {
+            let _ = writeln!(output, "- plan: {plan}");
         }
 
         // Model-scoped quotas: one of these can be spent while session and

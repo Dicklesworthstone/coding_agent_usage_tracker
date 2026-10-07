@@ -116,12 +116,78 @@
         "tertiary": {
           "$ref": "#/$defs/RateWindow"
         },
+        "scoped": {
+          "type": "array",
+          "description": "Quotas scoped to one model or feature (Claude weekly Opus/Fable, Codex Spark, Gemini per-model buckets)",
+          "items": {
+            "$ref": "#/$defs/ScopedWindow"
+          }
+        },
+        "providerCost": {
+          "$ref": "#/$defs/ProviderCostSnapshot"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time"
         },
         "identity": {
           "$ref": "#/$defs/ProviderIdentity"
+        }
+      }
+    },
+    "ScopedWindow": {
+      "type": "object",
+      "required": ["label", "window"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Model or feature the quota applies to"
+        },
+        "kind": {
+          "type": "string",
+          "description": "Provider's name for the window, e.g. weekly_scoped or codex-spark"
+        },
+        "severity": {
+          "type": "string",
+          "description": "Provider's own grading: normal, warning, critical"
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether this is the limit currently binding the account"
+        },
+        "window": {
+          "$ref": "#/$defs/RateWindow"
+        }
+      }
+    },
+    "ProviderCostSnapshot": {
+      "type": "object",
+      "required": ["used", "limit", "currencyCode", "updatedAt"],
+      "properties": {
+        "used": {
+          "type": "number",
+          "description": "Amount spent in the current period"
+        },
+        "limit": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The period's cap; 0 means no cap"
+        },
+        "currencyCode": {
+          "type": "string",
+          "description": "ISO 4217 code (USD) or a provider credit unit (credits)"
+        },
+        "period": {
+          "type": "string",
+          "description": "Human-friendly period label, e.g. Monthly"
+        },
+        "resetsAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },

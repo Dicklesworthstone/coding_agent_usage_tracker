@@ -212,16 +212,91 @@ impl Provider {
         }
     }
 
-    /// Get the status page URL for this provider.
+    /// Get the Statuspage (`<url>/api/v2/status.json`) base URL for this
+    /// provider. Google's providers publish no Statuspage feed, so they have
+    /// none.
     #[must_use]
     pub const fn status_page_url(self) -> Option<&'static str> {
         match self {
             Self::Codex => Some("https://status.openai.com"),
-            Self::Claude => Some("https://status.anthropic.com"),
-            Self::Gemini | Self::VertexAI => Some("https://status.cloud.google.com"),
+            Self::Claude => Some("https://status.claude.com"),
             Self::Cursor => Some("https://status.cursor.com"),
             Self::Copilot => Some("https://www.githubstatus.com"),
+            Self::Factory => Some("https://status.factory.ai"),
             _ => None,
+        }
+    }
+
+    /// Label for the `primary` window, as `CodexBar` names it.
+    #[must_use]
+    pub const fn session_label(self) -> &'static str {
+        match self {
+            Self::Codex | Self::Claude => "Session",
+            Self::Gemini => "Pro",
+            Self::Antigravity => "Gemini Models",
+            Self::Cursor => "Total",
+            Self::OpenCode | Self::Zai => "5-hour",
+            Self::Factory => "Standard",
+            Self::MiniMax => "Prompts",
+            Self::Kimi => "7-day usage",
+            Self::Copilot => "Premium",
+            Self::KimiK2 | Self::Kiro => "Credits",
+            Self::VertexAI => "Requests",
+            Self::JetBrainsAI => "Current",
+            Self::Amp => "Amp Free",
+        }
+    }
+
+    /// Label for the `secondary` window, as `CodexBar` names it.
+    #[must_use]
+    pub const fn weekly_label(self) -> &'static str {
+        match self {
+            Self::Codex | Self::Claude | Self::OpenCode | Self::Zai | Self::KimiK2 => "Weekly",
+            Self::Gemini => "Flash",
+            Self::Antigravity => "Claude and GPT",
+            Self::Cursor => "Cursor",
+            Self::Factory => "Premium",
+            Self::MiniMax => "Window",
+            Self::Kimi => "5-hour usage",
+            Self::Copilot => "Chat",
+            Self::Kiro => "Bonus",
+            Self::VertexAI => "Tokens",
+            Self::JetBrainsAI => "Refill",
+            Self::Amp => "Balance",
+        }
+    }
+
+    /// Label for the `tertiary` window, for providers that report one.
+    #[must_use]
+    pub const fn tertiary_label(self) -> Option<&'static str> {
+        match self {
+            Self::Claude => Some("Opus/Sonnet"),
+            Self::Gemini => Some("Flash Lite"),
+            Self::Cursor => Some("Third Party"),
+            _ => None,
+        }
+    }
+
+    /// The provider's usage / billing dashboard.
+    #[must_use]
+    pub const fn dashboard_url(self) -> Option<&'static str> {
+        match self {
+            Self::Codex => Some("https://chatgpt.com/codex/cloud/settings/analytics#usage"),
+            Self::Claude => Some("https://claude.ai/settings/usage"),
+            Self::Gemini => Some("https://gemini.google.com"),
+            Self::Cursor => Some("https://cursor.com/dashboard?tab=usage"),
+            Self::OpenCode => Some("https://opencode.ai/auth"),
+            Self::Factory => Some("https://app.factory.ai/settings/billing"),
+            Self::Zai => Some("https://z.ai/manage-apikey/coding-plan/personal/my-plan"),
+            Self::MiniMax => {
+                Some("https://platform.minimax.io/user-center/payment/coding-plan?cycle_type=3")
+            }
+            Self::Kimi => Some("https://www.kimi.com/code/console"),
+            Self::Copilot => Some("https://github.com/settings/copilot"),
+            Self::Kiro => Some("https://app.kiro.dev/account/usage"),
+            Self::VertexAI => Some("https://console.cloud.google.com/vertex-ai"),
+            Self::Amp => Some("https://ampcode.com/settings/usage"),
+            Self::Antigravity | Self::KimiK2 | Self::JetBrainsAI => None,
         }
     }
 
@@ -372,113 +447,50 @@ impl ProviderRegistry {
     /// Create the registry with all providers.
     #[must_use]
     pub fn new() -> Self {
-        let mut descriptors = HashMap::new();
-
-        // Codex
-        descriptors.insert(
-            Provider::Codex,
-            ProviderDescriptor {
-                id: Provider::Codex,
-                metadata: ProviderMetadata {
-                    display_name: "Codex",
-                    session_label: "Session",
-                    weekly_label: "Weekly",
-                    supports_opus: false,
-                    opus_label: None,
-                    supports_credits: true,
-                    status_page_url: Some("https://status.openai.com"),
-                    dashboard_url: Some("https://platform.openai.com/usage"),
-                },
-                branding: ProviderBranding {
-                    primary_color: "#10A37F",
-                    icon: "󰧑",
-                },
-            },
-        );
-
-        // Claude
-        descriptors.insert(
-            Provider::Claude,
-            ProviderDescriptor {
-                id: Provider::Claude,
-                metadata: ProviderMetadata {
-                    display_name: "Claude",
-                    session_label: "Chat",
-                    weekly_label: "Weekly",
-                    supports_opus: true,
-                    opus_label: Some("Opus/Sonnet"),
-                    supports_credits: false,
-                    status_page_url: Some("https://status.anthropic.com"),
-                    dashboard_url: Some("https://claude.ai/settings/usage"),
-                },
-                branding: ProviderBranding {
-                    primary_color: "#D97706",
-                    icon: "󰚩",
-                },
-            },
-        );
-
-        // Gemini
-        descriptors.insert(
-            Provider::Gemini,
-            ProviderDescriptor {
-                id: Provider::Gemini,
-                metadata: ProviderMetadata {
-                    display_name: "Gemini",
-                    session_label: "Session",
-                    weekly_label: "Weekly",
-                    supports_opus: false,
-                    opus_label: None,
-                    supports_credits: false,
-                    status_page_url: Some("https://status.cloud.google.com"),
-                    dashboard_url: Some("https://aistudio.google.com"),
-                },
-                branding: ProviderBranding {
-                    primary_color: "#4285F4",
-                    icon: "󰊭",
-                },
-            },
-        );
-
-        // Add remaining providers with sensible defaults
-        for provider in [
-            Provider::Antigravity,
-            Provider::Cursor,
-            Provider::OpenCode,
-            Provider::Factory,
-            Provider::Zai,
-            Provider::MiniMax,
-            Provider::Kimi,
-            Provider::Copilot,
-            Provider::KimiK2,
-            Provider::Kiro,
-            Provider::VertexAI,
-            Provider::JetBrainsAI,
-            Provider::Amp,
-        ] {
-            descriptors.insert(
-                provider,
-                ProviderDescriptor {
+        let descriptors = Provider::ALL
+            .iter()
+            .map(|&provider| {
+                let tertiary = provider.tertiary_label();
+                let descriptor = ProviderDescriptor {
                     id: provider,
                     metadata: ProviderMetadata {
                         display_name: provider.display_name(),
-                        session_label: "Session",
-                        weekly_label: "Weekly",
-                        supports_opus: false,
-                        opus_label: None,
-                        supports_credits: false,
-                        status_page_url: None,
-                        dashboard_url: None,
+                        session_label: provider.session_label(),
+                        weekly_label: provider.weekly_label(),
+                        supports_opus: tertiary.is_some(),
+                        opus_label: tertiary,
+                        supports_credits: provider.supports_credits(),
+                        status_page_url: provider.status_page_url(),
+                        dashboard_url: provider.dashboard_url(),
                     },
-                    branding: ProviderBranding {
-                        primary_color: "#888888",
-                        icon: "●",
-                    },
-                },
-            );
-        }
-
+                    branding: Self::branding(provider),
+                };
+                (provider, descriptor)
+            })
+            .collect();
         Self { descriptors }
+    }
+
+    /// Terminal branding for a provider.
+    const fn branding(provider: Provider) -> ProviderBranding {
+        match provider {
+            Provider::Codex => ProviderBranding {
+                primary_color: "#10A37F",
+                icon: "󰧑",
+            },
+            Provider::Claude => ProviderBranding {
+                primary_color: "#D97706",
+                icon: "󰚩",
+            },
+            Provider::Gemini => ProviderBranding {
+                primary_color: "#4285F4",
+                icon: "󰊭",
+            },
+            _ => ProviderBranding {
+                primary_color: "#888888",
+                icon: "●",
+            },
+        }
     }
 
     /// Get descriptor for a provider.
@@ -529,6 +541,36 @@ mod tests {
         for provider in Provider::ALL {
             assert!(registry.get(*provider).is_some());
         }
+    }
+
+    #[test]
+    fn registry_metadata_comes_from_provider_labels() {
+        let registry = ProviderRegistry::new();
+        for &provider in Provider::ALL {
+            let meta = &registry.get(provider).unwrap().metadata;
+            assert_ne!(meta.session_label, "");
+            assert_ne!(meta.weekly_label, "");
+            assert_ne!(meta.session_label, meta.weekly_label, "{provider:?}");
+            assert_eq!(meta.supports_opus, meta.opus_label.is_some());
+            assert_eq!(meta.display_name, provider.display_name());
+        }
+        let gemini = &registry.get(Provider::Gemini).unwrap().metadata;
+        assert_eq!(
+            (gemini.session_label, gemini.weekly_label, gemini.opus_label),
+            ("Pro", "Flash", Some("Flash Lite"))
+        );
+        assert_eq!(Provider::Copilot.session_label(), "Premium");
+        assert_eq!(Provider::Codex.tertiary_label(), None);
+    }
+
+    #[test]
+    fn status_pages_are_statuspage_feeds_only() {
+        assert_eq!(
+            Provider::Claude.status_page_url(),
+            Some("https://status.claude.com")
+        );
+        assert_eq!(Provider::Gemini.status_page_url(), None);
+        assert_eq!(Provider::VertexAI.status_page_url(), None);
     }
 
     #[test]
