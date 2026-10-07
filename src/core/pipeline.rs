@@ -17,6 +17,8 @@ use crate::providers;
 pub struct FetchRequest {
     pub provider: Provider,
     pub ctx: FetchContext,
+    /// Configured timeout; `None` uses the provider's default.
+    pub timeout: Option<Duration>,
 }
 
 impl FetchRequest {
@@ -26,6 +28,7 @@ impl FetchRequest {
         Self {
             provider,
             ctx: FetchContext::default(),
+            timeout: None,
         }
     }
 }
@@ -171,7 +174,9 @@ pub async fn fetch_providers_with_timeout(
     fetch_requests(&requests, mode, timeout_override).await
 }
 
-/// Run several fetch requests in parallel, each under its own timeout.
+/// Run several fetch requests in parallel, each under its own timeout:
+/// `timeout_override` (the CLI flag), else the request's configured
+/// timeout, else the provider default.
 pub async fn fetch_requests(
     requests: &[FetchRequest],
     mode: SourceMode,
@@ -180,7 +185,9 @@ pub async fn fetch_requests(
     let futures: Vec<_> = requests
         .iter()
         .map(|request| {
-            let timeout = timeout_override.unwrap_or_else(|| request.provider.default_timeout());
+            let timeout = timeout_override
+                .or(request.timeout)
+                .unwrap_or_else(|| request.provider.default_timeout());
             fetch_provider_with_timeout(request.provider, mode, &request.ctx, timeout)
         })
         .collect();

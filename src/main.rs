@@ -87,8 +87,11 @@ async fn run(cli: Cli) -> caut::Result<()> {
             Ok(())
         }
 
-        Some(Commands::Usage(args)) => {
-            caut::cli::usage::execute(&args, format, pretty, no_color).await
+        Some(Commands::Usage(ref args)) => {
+            // Output settings follow CLI > env > config file > defaults.
+            let resolved = caut::storage::ResolvedConfig::resolve(&cli, Some(args))?;
+            let no_color = resolved.no_color || no_color;
+            caut::cli::usage::execute(args, resolved.format, resolved.pretty, no_color).await
         }
 
         Some(Commands::Cost(args)) => {

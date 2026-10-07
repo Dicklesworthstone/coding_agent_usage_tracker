@@ -11,9 +11,98 @@ use crate::core::provider::{Provider, ProviderSelection};
 use crate::core::status::StatusFetcher;
 use crate::error::{CautError, Result};
 use crate::render::{human, robot};
+use crate::storage::config::{Config, ENV_CONFIG, ENV_PROVIDERS, ENV_TIMEOUT};
 use crate::storage::token_accounts::{AccountSelection, TokenAccountStore};
 use crate::storage::{AppPaths, HistoryStore, RetentionPolicy};
+use std::path::Path;
 use tokio::time::Duration;
+
+/// The general timeout `Config::default()` writes; a config file that keeps
+/// it has not asked for a global override.
+const DEFAULT_CONFIG_TIMEOUT_SECS: u64 = 30;
+
+/// Load and validate the config file, honoring `CAUT_CONFIG`.
+///
+/// # Errors
+/// Returns an error if the file exists but is invalid.
+fn load_config() -> Result<Config> {
+    let config = match std::env::var(ENV_CONFIG) {
+        Ok(path) if !path.trim().is_empty() => Config::load_from(Path::new(path.trim()))?,
+        _ => Config::load()?,
+    };
+    config.validate()?;
+    Ok(config)
+}
+
+/// Which providers to fetch.
+///
+/// `--provider` wins (`both`, `all` or a name), then `CAUT_PROVIDERS`, then
+/// the config file's `default_providers`, then Codex + Claude. Providers the
+/// config disables (`[providers.<name>] enabled = false`) are dropped from
+/// the env and config lists, but an explicit `--provider` is honored.
+///
+/// # Errors
+/// Returns an error for an unknown provider name or when every listed
+/// provider is disabled.
+fn resolve_providers(
+    arg: Option<&str>,
+    env: Option<&str>,
+    config: &Config,
+) -> Result<Vec<Provider>> {
+    if let Some(arg) = arg {
+        return Ok(ProviderSelection::from_arg(arg)?.providers());
+    }
+    let listed: Vec<Provider> = if let Some(env) = env.filter(|e| !e.trim().is_empty()) {
+        env.split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(Provider::from_cli_name)
+            .collect::<Result<_>>()?
+    } else if config.providers.default_providers.is_empty() {
+        ProviderSelection::default().providers()
+    } else {
+        config
+            .providers
+            .default_providers
+            .iter()
+            .map(|name| Provider::from_cli_name(name))
+            .collect::<Result<_>>()?
+    };
+    let mut providers: Vec<Provider> = Vec::new();
+    for provider in listed {
+        if config.providers.is_enabled(provider.cli_name()) && !providers.contains(&provider) {
+            providers.push(provider);
+        }
+    }
+    if providers.is_empty() {
+        return Err(CautError::Config(
+            "Every selected provider is disabled in the config file; pass --provider <name>"
+                .to_string(),
+        ));
+    }
+    Ok(providers)
+}
+
+/// Timeout for one provider from configuration: its own
+/// `timeout_seconds`, else `CAUT_TIMEOUT`, else a non-default
+/// `general.timeout_seconds`; `None` keeps the provider's built-in default.
+fn configured_timeout(
+    provider: Provider,
+    config: &Config,
+    env_timeout: Option<u64>,
+) -> Option<Duration> {
+    config
+        .providers
+        .settings
+        .get(provider.cli_name())
+        .and_then(|s| s.timeout_seconds)
+        .or(env_timeout)
+        .or_else(|| {
+            (config.general.timeout_seconds != DEFAULT_CONFIG_TIMEOUT_SECS)
+                .then_some(config.general.timeout_seconds)
+        })
+        .map(Duration::from_secs)
+}
 
 /// Turn providers plus an account selection into fetch requests.
 ///
@@ -51,6 +140,7 @@ fn build_requests(
         .map(|account| FetchRequest {
             provider: *provider,
             ctx: FetchContext::with_account(account.label.clone(), account.token.clone()),
+            timeout: None,
         })
         .collect())
 }
@@ -117,15 +207,12 @@ pub async fn execute(
 }
 
 pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
-    // Parse provider selection
-    let selection = args
-        .provider
-        .as_deref()
-        .map(ProviderSelection::from_arg)
-        .transpose()?
-        .unwrap_or_default();
-
-    let providers = selection.providers();
+    let config = load_config()?;
+    let providers = resolve_providers(
+        args.provider.as_deref(),
+        std::env::var(ENV_PROVIDERS).ok().as_deref(),
+        &config,
+    )?;
     let source_mode = args.effective_source();
 
     tracing::debug!(?providers, ?source_mode, "Starting usage fetch");
@@ -135,16 +222,23 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
         index: args.account_index.map(|i| i.saturating_sub(1)),
         all: args.all_accounts,
     };
-    let requests = build_requests(&providers, &account_selection, || {
+    let mut requests = build_requests(&providers, &account_selection, || {
         TokenAccountStore::load(&AppPaths::new().token_accounts_file())
     })?;
+    let env_timeout = std::env::var(ENV_TIMEOUT)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0);
+    for request in &mut requests {
+        request.timeout = configured_timeout(request.provider, &config, env_timeout);
+    }
 
-    // Fetch usage data from providers
+    // Fetch usage data from providers (CLI --timeout beats configured ones)
     let timeout_override = args.effective_timeout_override().map(Duration::from_secs);
     let outcomes = fetch_requests(&requests, source_mode, timeout_override).await;
 
     // Optionally fetch status
-    let status_fetcher = if args.status {
+    let status_fetcher = if args.status || config.general.include_status {
         Some(StatusFetcher::new())
     } else {
         None
@@ -356,6 +450,82 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("does not support token accounts"));
+    }
+
+    fn config_from(toml_text: &str) -> Config {
+        let config: Config = toml::from_str(toml_text).unwrap();
+        config.validate().unwrap();
+        config
+    }
+
+    #[test]
+    fn providers_flag_beats_env_and_config() {
+        let config = config_from("[providers]\ndefault_providers = [\"zai\"]\n");
+        assert_eq!(
+            resolve_providers(Some("copilot"), Some("cursor"), &config).unwrap(),
+            [Provider::Copilot]
+        );
+        assert_eq!(
+            resolve_providers(None, Some("cursor, kiro"), &config).unwrap(),
+            [Provider::Cursor, Provider::Kiro]
+        );
+        assert_eq!(
+            resolve_providers(None, None, &config).unwrap(),
+            [Provider::Zai]
+        );
+        assert!(resolve_providers(None, Some("nope"), &config).is_err());
+    }
+
+    #[test]
+    fn disabled_providers_are_dropped_unless_named() {
+        let config = config_from(
+            "[providers]\ndefault_providers = [\"claude\", \"codex\", \"claude\"]\n[providers.codex]\nenabled = false\n",
+        );
+        assert_eq!(
+            resolve_providers(None, None, &config).unwrap(),
+            [Provider::Claude],
+            "disabled dropped, duplicates collapsed"
+        );
+        assert_eq!(
+            resolve_providers(Some("codex"), None, &config).unwrap(),
+            [Provider::Codex]
+        );
+        let all_disabled = config_from(
+            "[providers]\ndefault_providers = [\"codex\"]\n[providers.codex]\nenabled = false\n",
+        );
+        assert!(resolve_providers(None, None, &all_disabled).is_err());
+    }
+
+    #[test]
+    fn default_providers_without_config() {
+        let config = Config::default();
+        let providers = resolve_providers(None, None, &config).unwrap();
+        assert!(providers.contains(&Provider::Claude));
+        assert!(providers.contains(&Provider::Codex));
+    }
+
+    #[test]
+    fn configured_timeout_precedence() {
+        let config = config_from(
+            "[general]\ntimeout_seconds = 45\n[providers.cursor]\ntimeout_seconds = 7\n",
+        );
+        assert_eq!(
+            configured_timeout(Provider::Cursor, &config, Some(12)),
+            Some(Duration::from_secs(7))
+        );
+        assert_eq!(
+            configured_timeout(Provider::Zai, &config, Some(12)),
+            Some(Duration::from_secs(12))
+        );
+        assert_eq!(
+            configured_timeout(Provider::Zai, &config, None),
+            Some(Duration::from_secs(45))
+        );
+        assert_eq!(
+            configured_timeout(Provider::Zai, &Config::default(), None),
+            None,
+            "the default general timeout keeps provider defaults"
+        );
     }
 
     #[test]
