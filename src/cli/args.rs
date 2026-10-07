@@ -99,6 +99,10 @@ pub enum Commands {
     /// Inspect or create the config file
     #[command(subcommand)]
     Config(ConfigCommand),
+
+    /// Run a Model Context Protocol server on stdio for AI agents
+    /// (e.g. `claude mcp add caut -- caut mcp`)
+    Mcp,
 }
 
 /// Config subcommands.

@@ -5,6 +5,7 @@ pub mod config;
 pub mod cost;
 pub mod doctor;
 pub mod history;
+pub mod mcp;
 pub mod prompt;
 pub mod query;
 pub mod serve;

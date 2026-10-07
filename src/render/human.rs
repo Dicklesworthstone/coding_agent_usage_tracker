@@ -284,9 +284,7 @@ fn identity_lines(payload: &ProviderPayload) -> Vec<String> {
         (Some(account), None) => Some(account.to_string()),
         (None, None) => None,
     };
-    let plan = identity
-        .and_then(|i| i.login_method.as_deref())
-        .filter(|plan| is_plan_name(plan));
+    let plan = identity.and_then(crate::core::models::ProviderIdentity::plan);
     account
         .map(|a| format!("Account: {a}"))
         .into_iter()
@@ -347,25 +345,6 @@ fn format_provider_cost(cost: &ProviderCostSnapshot) -> String {
         let _ = write!(line, " · resets {}", format_countdown(resets_at));
     }
     line
-}
-
-/// Whether an identity's `login_method` names a plan rather than the
-/// mechanism caut used to log in.
-fn is_plan_name(value: &str) -> bool {
-    const MECHANISMS: &[&str] = &[
-        "oauth",
-        "oauth-partial",
-        "web",
-        "cli",
-        "cli-local",
-        "api",
-        "api-key",
-        "apikey",
-        "local",
-        "fixture",
-    ];
-    let trimmed = value.trim();
-    !trimmed.is_empty() && !MECHANISMS.iter().any(|m| trimmed.eq_ignore_ascii_case(m))
 }
 
 /// Format status as styled segments.
@@ -879,11 +858,19 @@ mod tests {
 
     #[test]
     fn login_mechanisms_are_not_plans() {
-        assert!(is_plan_name("pro"));
-        assert!(is_plan_name("Claude Max"));
-        assert!(!is_plan_name("oauth"));
-        assert!(!is_plan_name("CLI"));
-        assert!(!is_plan_name(" "));
+        let plan_of = |value: &str| {
+            crate::core::models::ProviderIdentity {
+                login_method: Some(value.to_string()),
+                ..Default::default()
+            }
+            .plan()
+            .map(str::to_string)
+        };
+        assert_eq!(plan_of("pro").as_deref(), Some("pro"));
+        assert_eq!(plan_of(" Claude Max ").as_deref(), Some("Claude Max"));
+        assert_eq!(plan_of("oauth"), None);
+        assert_eq!(plan_of("CLI"), None);
+        assert_eq!(plan_of(" "), None);
     }
 
     // =========================================================================

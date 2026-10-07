@@ -122,6 +122,8 @@ async fn run(cli: Cli) -> caut::Result<()> {
         Some(Commands::Query(args)) => caut::cli::query::execute(&args, pretty).await,
 
         Some(Commands::Config(cmd)) => caut::cli::config::execute(&cmd, format, pretty),
+
+        Some(Commands::Mcp) => caut::cli::mcp::execute().await,
     }
 }
 

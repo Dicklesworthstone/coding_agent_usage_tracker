@@ -69,6 +69,35 @@ pub struct ProviderIdentity {
     pub login_method: Option<String>,
 }
 
+impl ProviderIdentity {
+    /// Values of `login_method` that name how caut logged in rather than
+    /// the account's plan.
+    const LOGIN_MECHANISMS: &'static [&'static str] = &[
+        "oauth",
+        "oauth-partial",
+        "web",
+        "cli",
+        "cli-local",
+        "api",
+        "api-key",
+        "apikey",
+        "local",
+        "fixture",
+    ];
+
+    /// The plan name (`pro`, `Claude Max`, ...), when `login_method` holds
+    /// one — `CodexBar` stores the plan there.
+    #[must_use]
+    pub fn plan(&self) -> Option<&str> {
+        self.login_method.as_deref().map(str::trim).filter(|value| {
+            !value.is_empty()
+                && !Self::LOGIN_MECHANISMS
+                    .iter()
+                    .any(|m| value.eq_ignore_ascii_case(m))
+        })
+    }
+}
+
 // =============================================================================
 // Usage Snapshot
 // =============================================================================
