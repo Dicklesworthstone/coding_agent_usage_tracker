@@ -3,7 +3,7 @@
 use crate::cli::args::{OutputFormat, UsageArgs};
 use crate::cli::prompt::{ProviderPromptData, update_cache as update_prompt_cache};
 use crate::cli::watch;
-use crate::core::credential_health::AuthHealthAggregator;
+use crate::core::credential_health::{AuthHealthAggregator, OverallHealth};
 use crate::core::fetch_plan::FetchContext;
 use crate::core::models::{ProviderPayload, RobotOutput};
 use crate::core::pipeline::{FetchRequest, fetch_requests};
@@ -248,7 +248,9 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
     let mut payloads = Vec::new();
     let mut errors = Vec::new();
 
-    let paths = AppPaths::new();
+    let history = HistoryStore::open(&AppPaths::new().history_db_file())
+        .map_err(|e| tracing::warn!("History unavailable: {}", e))
+        .ok();
     let auth_checker = AuthHealthAggregator::new();
 
     for (request, outcome) in requests.iter().zip(outcomes) {
@@ -256,7 +258,7 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
         match outcome.result {
             Ok(snapshot) => {
                 // Record to history
-                if let Ok(store) = HistoryStore::open(&paths.history_db_file())
+                if let Some(store) = &history
                     && let Err(e) = store.record_snapshot(&snapshot, &outcome.provider)
                 {
                     tracing::warn!("Failed to record snapshot: {}", e);
@@ -273,9 +275,14 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
                     None
                 };
 
-                // Check auth health for this provider
+                // The fetch just succeeded, so the credentials it used work:
+                // only a warning about them expiring soon is actionable. A
+                // "missing"/"expired" verdict comes from a credential file
+                // this fetch did not need (token account, API key, cookie).
                 let auth_health = auth_checker.check_provider(outcome.provider);
-                let auth_warning = auth_health.warning_message();
+                let auth_warning = (auth_health.overall == OverallHealth::ExpiringSoon)
+                    .then(|| auth_health.warning_message())
+                    .flatten();
 
                 let payload = ProviderPayload {
                     provider: outcome.provider.cli_name().to_string(),
@@ -308,25 +315,28 @@ pub(crate) async fn fetch_usage(args: &UsageArgs) -> Result<UsageResults> {
         }
     }
 
-    // Update prompt cache with successful results
-    if !payloads.is_empty() {
-        let prompt_data: Vec<ProviderPromptData> = payloads
-            .iter()
-            .map(|p| ProviderPromptData {
-                provider: p.provider.clone(),
-                primary_pct: p.usage.primary.as_ref().map(|w| w.used_percent),
-                secondary_pct: p.usage.secondary.as_ref().map(|w| w.used_percent),
-                credits_remaining: p.credits.as_ref().map(|c| c.remaining),
-                cost_today_usd: None, // TODO: Extract cost from payload if available
-            })
-            .collect();
-
-        if let Err(e) = update_prompt_cache(&prompt_data) {
-            tracing::warn!("Failed to update prompt cache: {}", e);
-        }
-    }
-
+    refresh_prompt_cache(&payloads);
     Ok(UsageResults { payloads, errors })
+}
+
+/// Update the shell-prompt cache with successful results.
+fn refresh_prompt_cache(payloads: &[ProviderPayload]) {
+    if payloads.is_empty() {
+        return;
+    }
+    let prompt_data: Vec<ProviderPromptData> = payloads
+        .iter()
+        .map(|p| ProviderPromptData {
+            provider: p.provider.clone(),
+            primary_pct: p.usage.primary.as_ref().map(|w| w.used_percent),
+            secondary_pct: p.usage.secondary.as_ref().map(|w| w.used_percent),
+            credits_remaining: p.credits.as_ref().map(|c| c.remaining),
+            cost_today_usd: None,
+        })
+        .collect();
+    if let Err(e) = update_prompt_cache(&prompt_data) {
+        tracing::warn!("Failed to update prompt cache: {}", e);
+    }
 }
 
 pub(crate) fn render_usage_results(

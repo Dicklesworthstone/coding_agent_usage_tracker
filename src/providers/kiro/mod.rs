@@ -604,10 +604,14 @@ mod tests {
                 "echo 'Not logged in'\nexit 1",
                 "echo 'something went wrong' >&2\nexit 1",
             );
-            assert!(matches!(
-                run_cli_probe(&cli).await,
-                Err(CautError::AuthInvalid { reason, .. }) if reason.contains("kiro-cli login")
-            ));
+            let result = run_cli_probe(&cli).await;
+            assert!(
+                matches!(
+                    &result,
+                    Err(CautError::AuthInvalid { reason, .. }) if reason.contains("kiro-cli login")
+                ),
+                "{result:?}"
+            );
 
             let unparseable = fake_cli(
                 dir.path(),

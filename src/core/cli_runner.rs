@@ -30,6 +30,25 @@ impl CliOutput {
     }
 }
 
+/// `ETXTBSY`: the executable is open for writing somewhere (a CLI being
+/// upgraded, or a file descriptor inherited across another thread's
+/// `fork`). It clears within milliseconds.
+const TEXT_FILE_BUSY: i32 = 26;
+
+/// Spawn, retrying briefly while the executable reports `ETXTBSY`.
+fn spawn_with_retry(command: &mut Command) -> std::io::Result<tokio::process::Child> {
+    let mut attempt = 0;
+    loop {
+        match command.spawn() {
+            Err(e) if cfg!(unix) && e.raw_os_error() == Some(TEXT_FILE_BUSY) && attempt < 5 => {
+                attempt += 1;
+                std::thread::sleep(Duration::from_millis(20 * attempt));
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Run a CLI command with timeout.
 ///
 /// # Errors
@@ -43,21 +62,23 @@ pub async fn run_command(
     args: &[&str],
     timeout_duration: Duration,
 ) -> Result<CliOutput> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                CautError::ProviderNotFound(program.to_string())
-            } else {
-                CautError::FetchFailed {
-                    provider: program.to_string(),
-                    reason: e.to_string(),
-                }
+        // A probe abandoned by a timeout must not leave the CLI running.
+        .kill_on_drop(true);
+    let mut child = spawn_with_retry(&mut command).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CautError::ProviderNotFound(program.to_string())
+        } else {
+            CautError::FetchFailed {
+                provider: program.to_string(),
+                reason: e.to_string(),
             }
-        })?;
+        }
+    })?;
 
     let result = timeout(timeout_duration, async {
         // Read stdout and stderr concurrently to avoid deadlock.

@@ -148,6 +148,7 @@ impl Provider {
                 | Self::KimiK2
                 | Self::Copilot
                 | Self::Amp
+                | Self::Kiro
         )
     }
 
