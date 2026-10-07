@@ -1,0 +1,11 @@
+{"daysUntilReset":0,"limits":[],"nextDateReset":1.7882208E9,
+ "overageConfiguration":{"__type":"com.amazon.aws.codewhisperer#OverageConfiguration",
+   "overageStatus":"ENABLED"},
+ "subscriptionInfo":{"overageCapability":"OVERAGE_CAPABLE","subscriptionTitle":"KIRO POWER",
+   "type":"Q_DEVELOPER_STANDALONE_POWER"},
+ "usageBreakdownList":[{"bonuses":[],"currency":"USD","currentOverages":3603,
+   "currentOveragesWithPrecision":3603.49,"currentUsage":13603,
+   "currentUsageWithPrecision":13603.49,"displayName":"Credit","nextDateReset":1.7882208E9,
+   "overageCap":10000,"overageCapWithPrecision":10000.0,"overageCharges":144.139711109352,
+   "overageCredits":[],"overageRate":0.04,"resourceType":"CREDIT","unit":"INVOCATIONS",
+   "usageLimit":10000,"usageLimitWithPrecision":10000.0}]}

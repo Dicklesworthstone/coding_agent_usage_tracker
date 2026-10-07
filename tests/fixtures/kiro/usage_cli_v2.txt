@@ -1,0 +1,10 @@
+[1mEstimated Usage[0m | resets on 2026-06-01 | [mKIRO FREE[0m
+
+🎁 Bonus credits: 45.53/2000 credits used, expires in 19 days
+
+[1mCredits[0m (0.17 of 50 covered in plan)
+████████████████████ 0%
+
+Overages: [1mDisabled[0m
+
+To manage your plan or configure overages navigate to https://app.kiro.dev/account/usage
