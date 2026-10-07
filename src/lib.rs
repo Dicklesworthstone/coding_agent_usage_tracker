@@ -6,7 +6,8 @@
 // Note: deny (not forbid) to allow #[allow(unsafe_code)] in test helpers for env var manipulation
 #![deny(unsafe_code)]
 // The usage pipeline dispatches to one async fetcher per provider; proving
-// those futures `Send` (for `tokio::spawn`) exceeds the default limit.
+// those futures `Send` (for `tokio::spawn`, `cli::serve`) exceeds the default
+// limit (same limit as the binary crate in `main.rs`).
 #![recursion_limit = "256"]
 #![warn(clippy::pedantic, clippy::nursery)]
 #![allow(clippy::module_name_repetitions)]

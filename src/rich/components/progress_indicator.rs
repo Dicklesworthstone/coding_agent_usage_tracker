@@ -353,7 +353,7 @@ mod tests {
         let theme = create_default_theme();
         let progress = ProgressIndicator::new(3).with_completed(1);
         let segments = progress.render_segments(&theme);
-        assert!(!segments.is_empty());
+        assert_ne!(segments, [] as [Segment<'_>; 0]);
     }
 
     #[test]
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn test_spinner_new() {
         let spinner = Spinner::new();
-        assert!(!spinner.frame().is_empty());
+        assert_ne!(spinner.frame(), "");
     }
 
     #[test]

@@ -430,7 +430,7 @@ mod tests {
         let theme = create_default_theme();
         let table = UsageTable::new(&payloads, &theme);
         let segments = table.render_segments();
-        assert!(!segments.is_empty());
+        assert_ne!(segments, [] as [Vec<Segment<'_>>; 0]);
         // Should have header + 1 data row
         assert_eq!(segments.len(), 2);
     }

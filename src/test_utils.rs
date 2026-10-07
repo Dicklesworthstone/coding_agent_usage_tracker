@@ -15,9 +15,11 @@
 //! ```
 
 use chrono::{TimeDelta, Utc};
+use std::cell::Cell;
 use std::fs;
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::core::models::{
     CostDailyEntry, CostPayload, CostTotals, CreditEvent, CreditsSnapshot, ProviderIdentity,
@@ -475,6 +477,61 @@ impl Default for TestDir {
 }
 
 // =============================================================================
+// Environment Lock
+// =============================================================================
+
+/// Serializes tests that read or mutate process environment variables.
+///
+/// `std::env::set_var` / `remove_var` change state shared by every thread of
+/// the test binary, and the default harness runs tests on parallel threads.
+/// Modules overlap on variables (`NO_COLOR` is read by both `rich` and
+/// `storage::config`; `XDG_CONFIG_HOME` decides which `config.toml` the config
+/// tests load), so one process-wide lock is needed rather than one per module.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+thread_local! {
+    /// Whether this thread already holds [`ENV_LOCK`].
+    static ENV_LOCK_HELD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Guard returned by [`lock_env`]; releases the environment lock on drop.
+#[must_use = "the environment lock is released as soon as the guard is dropped"]
+pub struct EnvLockGuard {
+    /// `None` when an outer guard on this thread already holds the lock.
+    guard: Option<MutexGuard<'static, ()>>,
+}
+
+impl Drop for EnvLockGuard {
+    fn drop(&mut self) {
+        if self.guard.is_some() {
+            ENV_LOCK_HELD.with(|held| held.set(false));
+        }
+    }
+}
+
+/// Acquire the process-wide environment lock for the current test.
+///
+/// Bind the guard at the top of the test (`let _env = lock_env();`) so it is
+/// held for the whole body, including every env read the code under test
+/// performs. `Mutex` is not reentrant, so a nested call on a thread that
+/// already holds the lock returns a no-op guard instead of deadlocking. A
+/// poisoned lock (a failed assertion in another test) is still usable.
+pub fn lock_env() -> EnvLockGuard {
+    if env_lock_held() {
+        return EnvLockGuard { guard: None };
+    }
+    let guard = ENV_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    ENV_LOCK_HELD.with(|held| held.set(true));
+    EnvLockGuard { guard: Some(guard) }
+}
+
+/// Whether the current thread holds the environment lock (see [`lock_env`]).
+#[must_use]
+pub fn env_lock_held() -> bool {
+    ENV_LOCK_HELD.with(Cell::get)
+}
+
+// =============================================================================
 // Assertion Macros
 // =============================================================================
 
@@ -813,7 +870,7 @@ mod tests {
     fn credits_snapshot_factory_creates_with_events() {
         let credits = make_test_credits_snapshot(112.50);
         assert_float_eq!(credits.remaining, 112.50);
-        assert!(!credits.events.is_empty());
+        assert_ne!(credits.events, [] as [CreditEvent; 0]);
     }
 
     #[test]
@@ -848,6 +905,38 @@ mod tests {
             dir.read_file("subdir/nested/file.txt").unwrap(),
             "nested content"
         );
+    }
+
+    #[test]
+    fn lock_env_is_reentrant_on_the_same_thread() {
+        assert!(!env_lock_held());
+        let outer = lock_env();
+        assert!(env_lock_held());
+        {
+            // A nested acquisition must not deadlock, and dropping it must
+            // not release the outer guard's hold.
+            let _inner = lock_env();
+            assert!(env_lock_held());
+        }
+        assert!(env_lock_held());
+        drop(outer);
+        assert!(!env_lock_held());
+    }
+
+    #[test]
+    fn lock_env_survives_poisoning() {
+        // A test that panics while holding the lock poisons the mutex; later
+        // tests must still be able to take it.
+        let panicked = std::thread::spawn(|| {
+            let _env = lock_env();
+            panic!("simulated failing env test");
+        })
+        .join();
+        assert!(panicked.is_err());
+        assert!(ENV_LOCK.is_poisoned());
+
+        let _env = lock_env();
+        assert!(env_lock_held());
     }
 
     #[test]

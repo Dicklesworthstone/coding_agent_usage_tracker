@@ -207,12 +207,11 @@ pub fn init(level: LogLevel, format: LogFormat, log_file: Option<PathBuf>, verbo
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use crate::test_utils::lock_env;
 
     #[allow(unsafe_code)]
     fn with_env_var(key: &str, value: &str, f: impl FnOnce()) {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _env = lock_env();
         let prior = std::env::var(key).ok();
         unsafe {
             std::env::set_var(key, value);

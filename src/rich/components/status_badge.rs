@@ -206,8 +206,8 @@ mod tests {
             StatusLevel::Neutral,
         ];
         for level in levels {
-            assert!(!level.icon().is_empty());
-            assert!(!level.plain_icon().is_empty());
+            assert_ne!(level.icon(), "");
+            assert_ne!(level.plain_icon(), "");
         }
     }
 
@@ -216,6 +216,6 @@ mod tests {
         let theme = create_default_theme();
         let badge = StatusBadge::success().with_label("Done");
         let segments = badge.render_segments(&theme);
-        assert!(!segments.is_empty());
+        assert_ne!(segments, [] as [Segment<'_>; 0]);
     }
 }

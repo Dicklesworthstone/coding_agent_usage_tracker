@@ -228,7 +228,7 @@ mod tests {
         let theme = create_default_theme();
         let bar = UsageBar::new(75.0).with_label("Usage");
         let segments = bar.render_segments(&theme);
-        assert!(!segments.is_empty());
+        assert_ne!(segments, [] as [Segment<'_>; 0]);
     }
 
     #[test]

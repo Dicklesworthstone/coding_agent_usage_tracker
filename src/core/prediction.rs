@@ -496,8 +496,8 @@ mod tests {
     #[test]
     fn duration_formatting() {
         assert_eq!(format_duration_secs(42.0 * 60.0), "42m");
-        assert_eq!(format_duration_secs(5.0 * 3600.0 + 12.0 * 60.0), "5h 12m");
-        assert_eq!(format_duration_secs(3.0 * 86_400.0 + 4.0 * 3600.0), "3d 4h");
+        assert_eq!(format_duration_secs(18_720.0), "5h 12m");
+        assert_eq!(format_duration_secs(273_600.0), "3d 4h");
         assert_eq!(format_duration_secs(-5.0), "0m");
     }
 }

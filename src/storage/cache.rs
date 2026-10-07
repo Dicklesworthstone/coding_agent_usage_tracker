@@ -667,7 +667,7 @@ mod tests {
         // No temp files should remain
         let entries: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().collect();
         assert_eq!(entries.len(), 1);
-        assert!(entries[0].as_ref().unwrap().file_name() == "atomic.json");
+        assert_eq!(entries[0].as_ref().unwrap().file_name(), "atomic.json");
     }
 
     #[test]
@@ -889,6 +889,6 @@ mod tests {
         assert!(cache.get("codex").is_none());
 
         cache.clear_all().unwrap();
-        assert!(cache.list_cached().is_empty());
+        assert_eq!(cache.list_cached(), [] as [String; 0]);
     }
 }

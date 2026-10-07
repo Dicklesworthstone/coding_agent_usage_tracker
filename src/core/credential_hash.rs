@@ -463,8 +463,8 @@ mod tests {
 
         let hashes = hasher.hash_content(&content).expect("hash content");
 
-        assert!(!hashes.identity_hash.is_empty());
-        assert!(!hashes.content_hash.is_empty());
+        assert_ne!(hashes.identity_hash, "");
+        assert_ne!(hashes.content_hash, "");
         assert_eq!(
             hashes.identity_fields.email,
             Some("user@example.com".to_string())
@@ -665,7 +665,7 @@ mod tests {
         let hashes = hasher.hash_content(content).expect("hash");
 
         // Direct email field not found, but content hash should work
-        assert!(!hashes.content_hash.is_empty());
+        assert_ne!(hashes.content_hash, "");
     }
 
     #[test]
@@ -705,8 +705,8 @@ mod tests {
 
         let hashes = hasher.hash_content("{}").expect("hash empty");
 
-        assert!(!hashes.identity_hash.is_empty());
-        assert!(!hashes.content_hash.is_empty());
+        assert_ne!(hashes.identity_hash, "");
+        assert_ne!(hashes.content_hash, "");
         assert!(!hashes.identity_fields.has_identity());
     }
 }

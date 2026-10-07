@@ -10,56 +10,11 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::io::Write;
-use std::sync::Mutex;
 use tempfile::NamedTempFile;
 
 mod common;
 
 use common::logger::TestLogger;
-
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-struct EnvGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
-    prior: Vec<(String, Option<String>)>,
-}
-
-impl EnvGuard {
-    #[allow(unsafe_code)]
-    fn set(vars: &[(&str, Option<&str>)]) -> Self {
-        let lock = ENV_LOCK.lock().expect("env lock");
-        let mut prior = Vec::new();
-
-        for (key, value) in vars {
-            let key_string = (*key).to_string();
-            let existing = std::env::var(key).ok();
-            prior.push((key_string.clone(), existing));
-
-            unsafe {
-                match value {
-                    Some(val) => std::env::set_var(key, val),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-
-        Self { _lock: lock, prior }
-    }
-}
-
-impl Drop for EnvGuard {
-    #[allow(unsafe_code)]
-    fn drop(&mut self) {
-        for (key, value) in self.prior.drain(..) {
-            unsafe {
-                match value {
-                    Some(val) => std::env::set_var(&key, val),
-                    None => std::env::remove_var(&key),
-                }
-            }
-        }
-    }
-}
 
 #[test]
 #[allow(deprecated)]
@@ -162,14 +117,13 @@ fn corrupted_config_does_not_panic() {
     let mut temp_config = NamedTempFile::new().expect("create temp config");
     writeln!(temp_config, "this is not valid toml {{{{").expect("write temp config");
 
-    let _guard = EnvGuard::set(&[(
-        "CAUT_CONFIG",
-        Some(temp_config.path().to_str().expect("config path")),
-    )]);
-
     log.phase("execute");
+    // Point only the child at the corrupted config. Setting CAUT_CONFIG on
+    // this test process instead would leak it into every `caut` subprocess
+    // the other tests in this binary spawn concurrently.
     let output = Command::cargo_bin("caut")
         .unwrap()
+        .env("CAUT_CONFIG", temp_config.path())
         .arg("usage")
         .output()
         .expect("run caut with corrupted config");

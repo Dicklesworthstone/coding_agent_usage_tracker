@@ -524,7 +524,7 @@ mod tests {
     fn wrap_text_handles_empty() {
         let wrapped = wrap_text("", 60);
         assert_eq!(wrapped.len(), 1);
-        assert!(wrapped[0].is_empty());
+        assert_eq!(wrapped[0], "");
     }
 
     #[test]

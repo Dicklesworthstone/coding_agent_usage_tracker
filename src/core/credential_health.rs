@@ -1329,8 +1329,8 @@ mod tests {
             HealthSeverity::Urgent,
             HealthSeverity::Critical,
         ] {
-            assert!(!severity.icon().is_empty());
-            assert!(!severity.color().is_empty());
+            assert_ne!(severity.icon(), "");
+            assert_ne!(severity.color(), "");
         }
     }
 
@@ -1379,9 +1379,9 @@ mod tests {
     #[test]
     fn overall_health_icon() {
         // All statuses should have a non-empty icon
-        assert!(!OverallHealth::Healthy.icon().is_empty());
-        assert!(!OverallHealth::Expired.icon().is_empty());
-        assert!(!OverallHealth::Missing.icon().is_empty());
+        assert_ne!(OverallHealth::Healthy.icon(), "");
+        assert_ne!(OverallHealth::Expired.icon(), "");
+        assert_ne!(OverallHealth::Missing.icon(), "");
     }
 
     // =========================================================================

@@ -737,6 +737,7 @@ pub struct EffectiveProviderSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::{env_lock_held, lock_env};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -745,7 +746,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.general.timeout_seconds, 30);
         assert!(config.output.color);
-        assert!(!config.providers.default_providers.is_empty());
+        assert_ne!(config.providers.default_providers, [] as [String; 0]);
     }
 
     #[test]
@@ -867,19 +868,25 @@ pretty = true
     // ResolvedConfig tests
     // -------------------------------------------------------------------------
 
-    /// Helper to safely set an environment variable in tests.
-    /// SAFETY: Tests are run single-threaded with `cargo test -- --test-threads=1`
-    /// for tests that modify environment variables.
+    /// Set an environment variable in a test.
+    ///
+    /// The calling test must hold [`lock_env`] for its whole body (bind
+    /// `let _env = lock_env();` first), so that no other test reads or writes
+    /// the environment between this call and the assertions that depend on it.
     #[allow(unsafe_code)]
     fn set_env(key: &str, value: &str) {
-        // SAFETY: Tests modifying env vars should run single-threaded
+        assert!(env_lock_held(), "hold lock_env() before mutating env");
+        // SAFETY: the caller holds the process-wide env lock, so no other
+        // test thread touches the environment concurrently.
         unsafe { std::env::set_var(key, value) };
     }
 
-    /// Helper to safely remove an environment variable in tests.
+    /// Remove an environment variable in a test (see [`set_env`]).
     #[allow(unsafe_code)]
     fn remove_env(key: &str) {
-        // SAFETY: Tests modifying env vars should run single-threaded
+        assert!(env_lock_held(), "hold lock_env() before mutating env");
+        // SAFETY: the caller holds the process-wide env lock, so no other
+        // test thread touches the environment concurrently.
         unsafe { std::env::remove_var(key) };
     }
 
@@ -928,6 +935,7 @@ pretty = true
 
     #[test]
     fn resolved_config_default_values() {
+        let _env = lock_env();
         // Clear any env vars that might affect the test
         remove_env(ENV_PROVIDERS);
         remove_env(ENV_FORMAT);
@@ -950,6 +958,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_json_flag() {
+        let _env = lock_env();
         remove_env(ENV_FORMAT);
 
         let mut cli = make_test_cli();
@@ -963,6 +972,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_format_flag() {
+        let _env = lock_env();
         remove_env(ENV_FORMAT);
 
         let mut cli = make_test_cli();
@@ -976,6 +986,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_verbose_flag() {
+        let _env = lock_env();
         remove_env(ENV_VERBOSE);
 
         let mut cli = make_test_cli();
@@ -989,6 +1000,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_no_color_flag() {
+        let _env = lock_env();
         remove_env(ENV_NO_COLOR);
         remove_env(ENV_NO_COLOR_STD);
 
@@ -1003,6 +1015,7 @@ pretty = true
 
     #[test]
     fn resolved_config_cli_pretty_flag() {
+        let _env = lock_env();
         remove_env(ENV_PRETTY);
 
         let mut cli = make_test_cli();
@@ -1016,6 +1029,7 @@ pretty = true
 
     #[test]
     fn resolved_config_usage_args_provider() {
+        let _env = lock_env();
         remove_env(ENV_PROVIDERS);
 
         let cli = make_test_cli();
@@ -1031,6 +1045,7 @@ pretty = true
 
     #[test]
     fn resolved_config_usage_args_provider_both() {
+        let _env = lock_env();
         remove_env(ENV_PROVIDERS);
 
         let cli = make_test_cli();
@@ -1046,6 +1061,7 @@ pretty = true
 
     #[test]
     fn resolved_config_usage_args_timeout() {
+        let _env = lock_env();
         remove_env(ENV_TIMEOUT);
 
         let cli = make_test_cli();
@@ -1060,6 +1076,8 @@ pretty = true
 
     #[test]
     fn resolved_config_usage_args_status() {
+        // `resolve` reads the CAUT_* environment even though this test sets none.
+        let _env = lock_env();
         let cli = make_test_cli();
         let mut usage_args = make_test_usage_args();
         usage_args.status = true;
@@ -1123,6 +1141,7 @@ pretty = true
 
     #[test]
     fn is_env_truthy_values() {
+        let _env = lock_env();
         set_env("TEST_TRUTHY_1", "1");
         set_env("TEST_TRUTHY_TRUE", "true");
         set_env("TEST_TRUTHY_YES", "yes");
@@ -1153,6 +1172,7 @@ pretty = true
 
     #[test]
     fn env_providers_comma_separated() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         set_env(ENV_PROVIDERS, "claude,codex");
 
@@ -1169,6 +1189,7 @@ pretty = true
 
     #[test]
     fn env_providers_single() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         set_env(ENV_PROVIDERS, "claude");
 
@@ -1184,6 +1205,7 @@ pretty = true
 
     #[test]
     fn env_format_override() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         set_env(ENV_FORMAT, "json");
 
@@ -1198,6 +1220,7 @@ pretty = true
 
     #[test]
     fn env_timeout_override() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         set_env(ENV_TIMEOUT, "90");
 
@@ -1212,6 +1235,7 @@ pretty = true
 
     #[test]
     fn env_no_color_override() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         remove_env(ENV_NO_COLOR_STD);
         set_env(ENV_NO_COLOR, "1");
@@ -1227,6 +1251,7 @@ pretty = true
 
     #[test]
     fn env_no_color_std_override() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         remove_env(ENV_NO_COLOR);
         set_env(ENV_NO_COLOR_STD, ""); // Any value works for NO_COLOR standard
@@ -1242,6 +1267,7 @@ pretty = true
 
     #[test]
     fn env_verbose_override() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         set_env(ENV_VERBOSE, "true");
 
@@ -1256,6 +1282,7 @@ pretty = true
 
     #[test]
     fn env_pretty_override() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         set_env(ENV_PRETTY, "yes");
 
@@ -1270,6 +1297,7 @@ pretty = true
 
     #[test]
     fn cli_json_flag_overrides_env() {
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         set_env(ENV_FORMAT, "md");
 
@@ -1290,6 +1318,7 @@ pretty = true
         // Note: When CLI format is default (Human), env var takes precedence
         // This is because clap's default_value means we can't distinguish
         // "user explicitly passed --format human" from "default value"
+        let _env = lock_env();
         remove_env(ENV_CONFIG);
         set_env(ENV_FORMAT, "md");
 
@@ -1521,6 +1550,7 @@ timeout_seconds = 45
 
     #[test]
     fn caut_config_env_override() {
+        let _env = lock_env();
         // Create a temp config file
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("custom_config.toml");

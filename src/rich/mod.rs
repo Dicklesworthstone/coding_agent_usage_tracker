@@ -872,75 +872,45 @@ pub fn collect_rich_diagnostics(format: OutputFormat, no_color_flag: bool) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::make_test_provider_payload;
+    use crate::test_utils::{lock_env, make_test_provider_payload};
     use tracing_test::traced_test;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    thread_local! {
-        /// Whether this thread already holds `ENV_LOCK`.
-        static ENV_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    }
-
-    /// Run `f` while holding `ENV_LOCK`.
-    ///
-    /// Tests nest `with_env_var` / `without_env_var` to set several variables
-    /// at once; `Mutex` is not reentrant, so a nested call on the thread that
-    /// already holds the lock runs `f` directly instead of deadlocking. A
-    /// poisoned lock (a failed assertion in another test) is still usable.
-    fn with_env_lock(f: impl FnOnce()) {
-        struct ResetHeld;
-        impl Drop for ResetHeld {
-            fn drop(&mut self) {
-                ENV_LOCK_HELD.with(|held| held.set(false));
-            }
-        }
-
-        if ENV_LOCK_HELD.with(std::cell::Cell::get) {
-            f();
-            return;
-        }
-        let _guard = ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        ENV_LOCK_HELD.with(|held| held.set(true));
-        let _reset = ResetHeld;
-        f();
-    }
+    // Env-mutating helpers hold the process-wide `lock_env()` (shared with
+    // `storage::config`, which also reads `NO_COLOR`). Tests nest
+    // `with_env_var` / `without_env_var` to set several variables at once;
+    // the lock is reentrant per thread, so nesting does not deadlock.
 
     #[allow(unsafe_code)]
     fn with_env_var(key: &str, value: &str, f: impl FnOnce()) {
-        with_env_lock(|| {
-            let prior = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            f();
-            match prior {
-                Some(val) => unsafe {
-                    std::env::set_var(key, val);
-                },
-                None => unsafe {
-                    std::env::remove_var(key);
-                },
-            }
-        });
+        let _env = lock_env();
+        let prior = std::env::var(key).ok();
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        f();
+        match prior {
+            Some(val) => unsafe {
+                std::env::set_var(key, val);
+            },
+            None => unsafe {
+                std::env::remove_var(key);
+            },
+        }
     }
 
     #[allow(unsafe_code)]
     fn without_env_var(key: &str, f: impl FnOnce()) {
-        with_env_lock(|| {
-            let prior = std::env::var(key).ok();
+        let _env = lock_env();
+        let prior = std::env::var(key).ok();
+        unsafe {
+            std::env::remove_var(key);
+        }
+        f();
+        if let Some(val) = prior {
             unsafe {
-                std::env::remove_var(key);
+                std::env::set_var(key, val);
             }
-            f();
-            if let Some(val) = prior {
-                unsafe {
-                    std::env::set_var(key, val);
-                }
-            }
-        });
+        }
     }
 
     // =========================================================================
@@ -1044,9 +1014,7 @@ mod tests {
     fn test_term_dumb_disables_rich() {
         // Note: This test may not trigger in CI because stdout isn't a TTY,
         // so the not_tty check fires first. Testing the logic directly.
-        let _guard = ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _env = lock_env();
         let original = std::env::var("TERM").ok();
         #[allow(unsafe_code)]
         unsafe {
@@ -1218,7 +1186,7 @@ mod tests {
     fn test_rich_console_provides_theme() {
         let console = RichConsole::new(OutputFormat::Human, false);
         let theme = console.theme();
-        assert!(!theme.name().is_empty());
+        assert_ne!(theme.name(), "");
     }
 
     // =========================================================================
@@ -1326,9 +1294,9 @@ mod tests {
         let theme = create_default_theme();
         assert_eq!(theme.name, "default");
         // Core colors exist
-        assert!(!format!("{:?}", theme.primary).is_empty());
-        assert!(!format!("{:?}", theme.error).is_empty());
-        assert!(!format!("{:?}", theme.success).is_empty());
+        assert_ne!(format!("{:?}", theme.primary), "");
+        assert_ne!(format!("{:?}", theme.error), "");
+        assert_ne!(format!("{:?}", theme.success), "");
     }
 
     #[test]
