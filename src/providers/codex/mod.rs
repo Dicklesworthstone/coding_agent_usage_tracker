@@ -1,36 +1,62 @@
 //! Codex (`OpenAI`) provider implementation.
 //!
-//! Supports:
-//! - Web dashboard scraping (macOS only)
-//! - CLI local config (auth.json with JWT tokens)
-//! - CLI RPC
+//! Strategies, in `CodexBar`'s auto order:
 //!
-//! Source labels: `openai-web`, `codex-cli`
+//! 1. `codex-oauth` — the `ChatGPT` access token in Codex's `auth.json` (or a
+//!    token-account bearer token) against the `wham/usage` endpoint.
+//! 2. `codex-cli-rpc` — `codex app-server` over JSON-RPC
+//!    (`account/rateLimits/read`, `account/read`). The CLI refreshes its own
+//!    tokens, so this is also the recovery path for an expired `auth.json`.
+//! 3. `codex-web` (`--source web` or a cookie credential) — a `chatgpt.com`
+//!    session cookie exchanged for an access token via `/api/auth/session`,
+//!    then the same `wham/usage` call.
 //!
-//! The CLI local config reads identity and subscription info from
-//! `~/.codex/auth.json`, which contains JWT tokens with embedded claims
-//! about the user's plan type and subscription status.
+//! Source labels: `oauth`, `cli`, `web`.
+
+mod rpc;
 
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::Utc;
-use serde::Deserialize;
+use base64::Engine as _;
+use chrono::{DateTime, Utc};
+use serde_json::Value;
 
-use crate::core::cli_runner::{CLI_TIMEOUT, run_command, run_json_command};
 use crate::core::fetch_plan::{FetchContext, FetchKind, FetchPlan, FetchStrategy, ProviderFetch};
-use crate::core::models::{CreditsSnapshot, ProviderIdentity, RateWindow, UsageSnapshot};
+use crate::core::models::{
+    CreditsSnapshot, ProviderCostSnapshot, ProviderIdentity, RateWindow, ScopedWindow,
+    UsageSnapshot,
+};
 use crate::core::provider::Provider;
 use crate::error::{CautError, Result};
-
-/// Source label for web dashboard.
-pub const SOURCE_WEB: &str = "openai-web";
-
-/// Source label for CLI.
-pub const SOURCE_CLI: &str = "codex-cli";
+use crate::providers::common;
 
 /// CLI binary name.
 const CLI_NAME: &str = "codex";
+
+/// Default `ChatGPT` backend base URL.
+const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api/";
+
+/// Usage path under a `ChatGPT` `/backend-api` base.
+const CHATGPT_USAGE_PATH: &str = "/wham/usage";
+
+/// Usage path under any other (Codex API) base.
+const CODEX_USAGE_PATH: &str = "/api/codex/usage";
+
+/// `ChatGPT` session endpoint that trades a session cookie for an access token.
+const CHATGPT_SESSION_URL: &str = "https://chatgpt.com/api/auth/session";
+
+/// Refresh margin: a token this close to `exp` is treated as expired.
+const TOKEN_REFRESH_MARGIN_SECS: i64 = 5 * 60;
+
+/// Session window length (5 hours).
+const SESSION_WINDOW_MINUTES: i32 = 300;
+
+/// Weekly window length.
+const WEEKLY_WINDOW_MINUTES: i32 = 10_080;
+
+/// Environment variables holding a `chatgpt.com` cookie header.
+const COOKIE_ENV_VARS: &[&str] = &["CODEX_COOKIE", "CHATGPT_COOKIE"];
 
 // =============================================================================
 // Fetch Plan
@@ -43,18 +69,23 @@ pub fn fetch_plan() -> FetchPlan {
         Provider::Codex,
         vec![
             FetchStrategy {
-                id: "codex-web-dashboard",
-                kind: FetchKind::WebDashboard,
-                is_available: |_| {
-                    // Web dashboard requires macOS with cookies
-                    cfg!(target_os = "macos")
-                },
-                should_fallback: |_| true,
+                id: "codex-oauth",
+                kind: FetchKind::OAuth,
+                is_available: |ctx| oauth_credentials_for(ctx).is_some(),
+                should_fallback: oauth_should_fallback,
             },
             FetchStrategy {
                 id: "codex-cli-rpc",
                 kind: FetchKind::Cli,
-                is_available: |_| is_cli_available(),
+                // The CLI answers for whichever account it is logged into, so it
+                // cannot stand in for an explicitly selected token account.
+                is_available: |ctx| ctx.account_token().is_none() && is_cli_available(),
+                should_fallback: |_| true,
+            },
+            FetchStrategy {
+                id: "codex-web",
+                kind: FetchKind::WebDashboard,
+                is_available: |ctx| cookie_header_for(ctx).is_some(),
                 should_fallback: |_| false,
             },
         ],
@@ -65,15 +96,44 @@ pub fn fetch_plan() -> FetchPlan {
 ///
 /// # Errors
 /// Returns the strategy's error, or an error for an unknown strategy id.
-pub async fn fetch(strategy_id: &str, _ctx: &FetchContext) -> Result<ProviderFetch> {
+pub async fn fetch(strategy_id: &str, ctx: &FetchContext) -> Result<ProviderFetch> {
     match strategy_id {
-        "codex-web-dashboard" => fetch_web_dashboard().await.map(ProviderFetch::from),
-        "codex-cli-rpc" => fetch_cli().await.map(ProviderFetch::from),
+        "codex-oauth" => {
+            let creds = oauth_credentials_for(ctx).ok_or_else(|| {
+                common::missing_credential(
+                    Provider::Codex,
+                    "run `codex login` (no ChatGPT tokens in <CODEX_HOME>/auth.json)",
+                )
+            })?;
+            fetch_oauth(&creds).await
+        }
+        "codex-cli-rpc" => rpc::fetch_via_app_server().await,
+        "codex-web" => {
+            let cookie = cookie_header_for(ctx).ok_or_else(|| {
+                common::missing_credential(
+                    Provider::Codex,
+                    "set CODEX_COOKIE to a chatgpt.com Cookie header or add a token account",
+                )
+            })?;
+            fetch_web(&cookie).await
+        }
         _ => Err(crate::providers::unknown_strategy(
             Provider::Codex,
             strategy_id,
         )),
     }
+}
+
+/// `CodexBar` falls back from OAuth to the CLI only for states the CLI can
+/// repair (missing, expired or rejected credentials). Network, server and
+/// decode failures surface as-is instead of spawning `codex app-server`.
+const fn oauth_should_fallback(error: &CautError) -> bool {
+    matches!(
+        error,
+        CautError::AuthExpired { .. }
+            | CautError::AuthInvalid { .. }
+            | CautError::AuthNotConfigured { .. }
+    )
 }
 
 /// Check if the Codex CLI is available.
@@ -82,1280 +142,927 @@ fn is_cli_available() -> bool {
 }
 
 // =============================================================================
-// Local Config Types
+// Credentials
 // =============================================================================
 
-/// Get the Codex config directory path.
-///
-/// Resolution order (first match wins):
-/// 1. `CODEX_HOME` environment variable — the same knob `OpenAI`'s Codex CLI
-///    uses to relocate its config, so honoring it lets users run side-by-side
-///    accounts with separate config directories.
-/// 2. `~/.codex` — the documented default location.
-///
-/// See issue #6.
-fn get_codex_dir() -> Option<PathBuf> {
-    if let Ok(env_dir) = std::env::var("CODEX_HOME") {
-        let trimmed = env_dir.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed));
-        }
-    }
-    directories::BaseDirs::new().map(|d| d.home_dir().join(".codex"))
+/// The Codex home directory: `CODEX_HOME`, else `~/.codex`.
+fn codex_home() -> Option<PathBuf> {
+    common::dir_from_env_or_home("CODEX_HOME", ".codex")
 }
 
-/// Auth.json structure from ~/.codex/auth.json
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct CodexAuthJson {
-    #[serde(rename = "OPENAI_API_KEY")]
-    #[serde(default)]
-    openai_api_key: Option<String>,
-    #[serde(default)]
-    last_refresh: Option<String>,
-    #[serde(default)]
-    tokens: Option<CodexAuthTokens>,
-}
-
-/// OAuth tokens structure in auth.json
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct CodexAuthTokens {
-    #[serde(default)]
+/// `ChatGPT` OAuth credentials for the usage API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodexCredentials {
+    access_token: String,
     id_token: Option<String>,
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    #[serde(default)]
     account_id: Option<String>,
+    /// Access-token expiry from its JWT `exp` claim.
+    expires_at: Option<DateTime<Utc>>,
 }
 
-/// JWT claims from the `id_token` (decoded from base64).
-/// Contains OpenAI-specific auth information.
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct JwtClaims {
-    /// User email
-    #[serde(default)]
-    email: Option<String>,
-    /// Email verified flag
-    #[serde(default)]
-    email_verified: Option<bool>,
-    /// OpenAI-specific auth claims
-    #[serde(default, rename = "https://api.openai.com/auth")]
-    openai_auth: Option<OpenAiAuthClaims>,
-}
-
-/// OpenAI-specific claims embedded in JWT.
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct OpenAiAuthClaims {
-    /// `ChatGPT` account ID
-    #[serde(default)]
-    chatgpt_account_id: Option<String>,
-    /// Plan type (e.g., "pro", "plus", "free")
-    #[serde(default)]
-    chatgpt_plan_type: Option<String>,
-    /// User ID
-    #[serde(default)]
-    chatgpt_user_id: Option<String>,
-    /// Subscription active start date
-    #[serde(default)]
-    chatgpt_subscription_active_start: Option<String>,
-    /// Subscription active until date
-    #[serde(default)]
-    chatgpt_subscription_active_until: Option<String>,
-    /// Last subscription check timestamp
-    #[serde(default)]
-    chatgpt_subscription_last_checked: Option<String>,
-    /// Organizations the user belongs to
-    #[serde(default)]
-    organizations: Option<Vec<OpenAiOrganization>>,
-}
-
-/// Organization info from JWT claims.
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct OpenAiOrganization {
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    role: Option<String>,
-    #[serde(default)]
-    is_default: Option<bool>,
-}
-
-/// Read auth info from local ~/.codex/auth.json
-fn read_local_auth() -> Option<CodexAuthJson> {
-    let codex_dir = get_codex_dir()?;
-    let auth_path = codex_dir.join("auth.json");
-
-    if !auth_path.exists() {
-        tracing::debug!("Codex auth.json not found at {:?}", auth_path);
-        return None;
-    }
-
-    let content = fs::read_to_string(&auth_path).ok()?;
-    serde_json::from_str(&content).ok()
-}
-
-/// Check if user is authenticated with Codex
-fn is_authenticated() -> bool {
-    read_local_auth().is_some_and(|auth| auth.openai_api_key.is_some() || auth.tokens.is_some())
-}
-
-/// Decode JWT payload (the middle part between the two dots).
-/// JWTs are base64url encoded, so we need to handle URL-safe base64.
-fn decode_jwt_payload(token: &str) -> Option<JwtClaims> {
-    // JWT format: header.payload.signature
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        tracing::debug!("Invalid JWT format: expected 3 parts");
-        return None;
-    }
-
-    let payload = parts[1];
-
-    // Base64url decode: replace - with + and _ with /
-    let mut payload_std = payload.replace('-', "+").replace('_', "/");
-
-    // Add padding if needed
-    let padding = (4 - payload_std.len() % 4) % 4;
-    for _ in 0..padding {
-        payload_std.push('=');
-    }
-
-    // Decode base64
-    let Some(decoded) = base64_decode(&payload_std) else {
-        tracing::debug!("Failed to decode JWT payload as base64");
-        return None;
-    };
-
-    // Parse JSON
-    match serde_json::from_slice::<JwtClaims>(&decoded) {
-        Ok(claims) => Some(claims),
-        Err(e) => {
-            tracing::debug!(error = %e, "Failed to parse JWT claims as JSON");
-            None
-        }
-    }
-}
-
-/// Simple base64 decoder (standard alphabet with padding).
-fn base64_decode(input: &str) -> Option<Vec<u8>> {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut result = Vec::new();
-    let mut buffer: u32 = 0;
-    let mut bits_collected = 0;
-
-    for c in input.bytes() {
-        if c == b'=' {
-            break;
-        }
-
-        let value = ALPHABET.iter().position(|&x| x == c)?;
-        #[allow(clippy::cast_possible_truncation)] // base64 index fits in u32
-        let value_u32 = value as u32;
-        buffer = (buffer << 6) | value_u32;
-        bits_collected += 6;
-
-        if bits_collected >= 8 {
-            bits_collected -= 8;
-            #[allow(clippy::cast_possible_truncation)] // intentionally extracting low byte
-            let byte = (buffer >> bits_collected) as u8;
-            result.push(byte);
-            buffer &= (1 << bits_collected) - 1;
+impl CodexCredentials {
+    /// Credentials from a bare access token (a token account's bearer token).
+    fn from_access_token(token: &str) -> Self {
+        let token = common::strip_bearer(token).to_string();
+        let claims = decode_jwt_claims(&token);
+        Self {
+            account_id: claims.as_ref().and_then(account_id_from_claims),
+            expires_at: claims.as_ref().and_then(expiry_from_claims),
+            access_token: token,
+            id_token: None,
         }
     }
 
-    Some(result)
-}
-
-/// Extract identity info from local auth.json (including JWT claims).
-fn get_local_identity() -> Option<(ProviderIdentity, Option<SubscriptionInfo>)> {
-    let auth = read_local_auth()?;
-
-    // Try to extract from JWT token first
-    if let Some(tokens) = &auth.tokens {
-        if let Some(id_token) = &tokens.id_token
-            && let Some(claims) = decode_jwt_payload(id_token)
-        {
-            let openai_auth = claims.openai_auth.as_ref();
-
-            // Extract organization name from default org
-            let org_name = openai_auth.and_then(|a| {
-                a.organizations.as_ref().and_then(|orgs| {
-                    orgs.iter()
-                        .find(|o| o.is_default == Some(true))
-                        .and_then(|o| o.title.clone())
-                })
-            });
-
-            let identity = ProviderIdentity {
-                account_email: claims.email.clone(),
-                account_organization: org_name,
-                login_method: Some("oauth".to_string()),
-            };
-
-            // Extract subscription info
-            let subscription = openai_auth.map(|a| SubscriptionInfo {
-                plan_type: a.chatgpt_plan_type.clone(),
-                active_start: a.chatgpt_subscription_active_start.clone(),
-                active_until: a.chatgpt_subscription_active_until.clone(),
-                last_checked: a.chatgpt_subscription_last_checked.clone(),
-            });
-
-            tracing::debug!(
-                email = ?claims.email,
-                plan = ?openai_auth.and_then(|a| a.chatgpt_plan_type.as_ref()),
-                "Extracted identity from JWT"
-            );
-
-            return Some((identity, subscription));
-        }
-
-        // Fallback: just return account_id if available
-        if let Some(account_id) = &tokens.account_id {
-            return Some((
-                ProviderIdentity {
-                    account_email: None,
-                    account_organization: Some(account_id.clone()),
-                    login_method: Some("oauth-partial".to_string()),
-                },
-                None,
-            ));
-        }
+    /// Whether the access token is expired or about to be.
+    fn needs_refresh(&self, now: DateTime<Utc>) -> bool {
+        self.expires_at
+            .is_some_and(|exp| (exp - now).num_seconds() <= TOKEN_REFRESH_MARGIN_SECS)
     }
-
-    // API key auth (no identity info available)
-    if auth.openai_api_key.is_some() {
-        return Some((
-            ProviderIdentity {
-                account_email: None,
-                account_organization: None,
-                login_method: Some("api-key".to_string()),
-            },
-            None,
-        ));
-    }
-
-    None
 }
 
-/// Subscription information extracted from JWT.
-#[derive(Debug)]
-#[allow(dead_code)]
-struct SubscriptionInfo {
-    plan_type: Option<String>,
-    active_start: Option<String>,
-    active_until: Option<String>,
-    last_checked: Option<String>,
-}
-
-// =============================================================================
-// CLI Response Types
-// =============================================================================
-
-/// Response from `codex --rate-limit` or similar.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CodexRateLimitResponse {
-    #[serde(default)]
-    rate_limit: Option<CodexRateLimit>,
-    #[serde(default)]
-    credits: Option<CodexCredits>,
-    #[serde(default)]
-    user: Option<CodexUser>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CodexRateLimit {
-    #[serde(default)]
-    remaining_percent: Option<f64>,
-    #[serde(default)]
-    resets_at: Option<String>,
-    #[serde(default)]
-    weekly_remaining_percent: Option<f64>,
-    #[serde(default)]
-    weekly_resets_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CodexCredits {
-    #[serde(default)]
-    remaining: Option<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-struct CodexUser {
-    #[serde(default)]
-    email: Option<String>,
-    #[serde(default)]
-    plan: Option<String>,
-}
-
-// =============================================================================
-// Fetch Implementations
-// =============================================================================
-
-/// Fetch usage via web dashboard.
+/// Parse Codex's `auth.json`.
 ///
-/// This requires macOS with browser cookies available.
-///
-/// # Errors
-/// Returns an error if web dashboard scraping is not supported on the current
-/// platform or if the scraping operation fails.
-pub async fn fetch_web_dashboard() -> Result<UsageSnapshot> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err(CautError::UnsupportedSource {
-            provider: "codex".to_string(),
-            source_type: "web".to_string(),
-        })
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        // TODO: Implement actual web dashboard scraping
-        // This would involve:
-        // 1. Reading browser cookies
-        // 2. Making authenticated request to OpenAI dashboard
-        // 3. Parsing the response
-        Err(CautError::FetchFailed {
-            provider: "codex".to_string(),
-            reason: "Web dashboard scraping not yet implemented".to_string(),
-        })
-    }
-}
-
-/// Fetch usage via CLI.
-///
-/// Reads identity and subscription info from local auth.json file.
-/// The auth.json contains JWT tokens with embedded claims about
-/// the user's plan type and subscription status.
-///
-/// Note: The Codex CLI doesn't expose rate limit commands directly.
-/// Rate limit data would need to come from `OpenAI` API or web dashboard.
-///
-/// # Errors
-/// Returns an error if the CLI is unavailable or the rate limit response
-/// cannot be parsed.
-pub async fn fetch_cli() -> Result<UsageSnapshot> {
-    // First check version to confirm CLI is working
-    let version = get_cli_version().await.ok();
-    let now = Utc::now();
-
-    tracing::debug!(
-        ?version,
-        cli_available = is_cli_available(),
-        authenticated = is_authenticated(),
-        "Codex CLI fetch starting"
-    );
-
-    // Try JSON output if available (Codex CLI may add rate-limit commands in the future)
-    if let Ok(response) = try_json_rate_limit().await {
-        return Ok(parse_rate_limit_response(&response, version));
-    }
-
-    // Extract identity from local auth.json (includes JWT decoding)
-    let (identity, subscription) = if let Some((id, sub)) = get_local_identity() {
-        tracing::debug!(
-            email = ?id.account_email,
-            org = ?id.account_organization,
-            login_method = ?id.login_method,
-            plan = ?sub.as_ref().and_then(|s| s.plan_type.as_ref()),
-            "Extracted identity from local auth.json"
-        );
-        (Some(id), sub)
-    } else {
-        tracing::debug!("No identity found in local auth.json");
-        (
-            Some(ProviderIdentity {
-                account_email: None,
-                account_organization: None,
-                login_method: Some("cli-unauthenticated".to_string()),
-            }),
-            None,
-        )
-    };
-
-    // Log subscription info if available
-    if let Some(ref sub) = subscription {
-        tracing::info!(
-            plan = ?sub.plan_type,
-            until = ?sub.active_until,
-            "Codex subscription info"
-        );
-    }
-
-    // Return snapshot with identity info
-    // Note: Rate limit data is not available via CLI - would need API access
-    Ok(UsageSnapshot {
-        updated_at: now,
-        identity,
-        ..UsageSnapshot::empty()
+/// Returns `None` for an API-key-only file: `wham/usage` needs a `ChatGPT`
+/// login, so such a setup is served by the CLI strategy instead.
+fn parse_auth_json(content: &str) -> Option<CodexCredentials> {
+    let json: Value = serde_json::from_str(content).ok()?;
+    let tokens = json.get("tokens")?;
+    let access_token = string_field(tokens, &["access_token", "accessToken"])?;
+    let id_token = string_field(tokens, &["id_token", "idToken"]);
+    let access_claims = decode_jwt_claims(&access_token);
+    let id_claims = id_token.as_deref().and_then(decode_jwt_claims);
+    let account_id = string_field(tokens, &["account_id", "accountId"])
+        .or_else(|| id_claims.as_ref().and_then(account_id_from_claims))
+        .or_else(|| access_claims.as_ref().and_then(account_id_from_claims));
+    Some(CodexCredentials {
+        expires_at: access_claims.as_ref().and_then(expiry_from_claims),
+        access_token,
+        id_token,
+        account_id,
     })
 }
 
-/// Try to get rate limit via JSON output.
-async fn try_json_rate_limit() -> Result<CodexRateLimitResponse> {
-    // Try various command patterns that CLI tools commonly use
-    // The actual command depends on the Codex CLI implementation
-    let commands = [
-        &["rate-limit", "--json"][..],
-        &["status", "--json"][..],
-        &["usage", "--json"][..],
-    ];
+/// Read OAuth credentials from `<codex_home>/auth.json`.
+fn read_local_credentials() -> Option<CodexCredentials> {
+    let path = codex_home()?.join("auth.json");
+    let content = fs::read_to_string(path).ok()?;
+    parse_auth_json(&content)
+}
 
-    for args in commands {
-        if let Ok(response) =
-            run_json_command::<CodexRateLimitResponse>(CLI_NAME, args, CLI_TIMEOUT).await
-        {
-            return Ok(response);
-        }
+/// Whether a token-account credential is a cookie header rather than a
+/// bearer token. JWTs and opaque tokens never contain `=` or `;`.
+fn is_cookie_credential(token: &str) -> bool {
+    let trimmed = common::strip_bearer(token);
+    trimmed.contains('=') || trimmed.contains(';')
+}
+
+/// OAuth credentials for this fetch: a selected bearer-token account, else
+/// the local `auth.json`, else an active bearer-token account.
+fn oauth_credentials_for(ctx: &FetchContext) -> Option<CodexCredentials> {
+    if let Some(token) = ctx.account_token() {
+        return (!is_cookie_credential(token)).then(|| CodexCredentials::from_access_token(token));
     }
-
-    Err(CautError::FetchFailed {
-        provider: "codex".to_string(),
-        reason: "No rate limit command found".to_string(),
+    read_local_credentials().or_else(|| {
+        common::active_token_account(Provider::Codex)
+            .filter(|t| !is_cookie_credential(t))
+            .map(|t| CodexCredentials::from_access_token(&t))
     })
 }
 
-/// Parse rate limit response into `UsageSnapshot`.
-fn parse_rate_limit_response(
-    response: &CodexRateLimitResponse,
-    _version: Option<String>,
-) -> UsageSnapshot {
-    let now = Utc::now();
-
-    let primary = response.rate_limit.as_ref().and_then(|rl| {
-        rl.remaining_percent.map(|pct| {
-            let used = 100.0 - pct;
-            RateWindow {
-                used_percent: used,
-                window_minutes: None,
-                resets_at: rl.resets_at.as_ref().and_then(|s| s.parse().ok()),
-                reset_description: None,
-            }
-        })
-    });
-
-    let secondary = response.rate_limit.as_ref().and_then(|rl| {
-        rl.weekly_remaining_percent.map(|pct| {
-            let used = 100.0 - pct;
-            RateWindow {
-                used_percent: used,
-                window_minutes: Some(10080), // 7 days in minutes
-                resets_at: rl.weekly_resets_at.as_ref().and_then(|s| s.parse().ok()),
-                reset_description: None,
-            }
-        })
-    });
-
-    let identity = Some(ProviderIdentity {
-        account_email: response.user.as_ref().and_then(|u| u.email.clone()),
-        account_organization: None,
-        login_method: Some("cli".to_string()),
-    });
-
-    UsageSnapshot {
-        primary,
-        secondary,
-        tertiary: None,
-        scoped: Vec::new(),
-        provider_cost: None,
-        updated_at: now,
-        identity,
+/// A `chatgpt.com` cookie header for the web strategy.
+fn cookie_header_for(ctx: &FetchContext) -> Option<String> {
+    if let Some(token) = ctx.account_token() {
+        return is_cookie_credential(token).then(|| common::normalize_cookie_header(token));
     }
+    common::env_secret(COOKIE_ENV_VARS)
+        .or_else(|| {
+            common::active_token_account(Provider::Codex).filter(|t| is_cookie_credential(t))
+        })
+        .map(|raw| common::normalize_cookie_header(&raw))
 }
 
-/// Get the CLI version.
-async fn get_cli_version() -> Result<String> {
-    let output = run_command(CLI_NAME, &["--version"], CLI_TIMEOUT).await?;
+// =============================================================================
+// JWT helpers
+// =============================================================================
 
-    if output.success() {
-        // Parse version from output like "codex 0.6.0" or "0.6.0"
-        let version = output
-            .stdout
-            .split_whitespace()
-            .last()
-            .unwrap_or("unknown")
-            .to_string();
-        Ok(version)
+/// Decode a JWT's payload (no signature check: the claims only label the
+/// account, they grant nothing).
+fn decode_jwt_claims(token: &str) -> Option<Value> {
+    let mut parts = token.split('.');
+    let (_header, payload, _signature) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload.trim_end_matches('='))
+        .ok()?;
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    value.is_object().then_some(value)
+}
+
+/// The `ChatGPT` account id from JWT claims.
+fn account_id_from_claims(claims: &Value) -> Option<String> {
+    non_empty(claims.get("chatgpt_account_id"))
+        .or_else(|| non_empty(claims.pointer("/https:~1~1api.openai.com~1auth/chatgpt_account_id")))
+        .or_else(|| {
+            claims
+                .get("organizations")?
+                .as_array()?
+                .iter()
+                .find_map(|org| non_empty(org.get("id")))
+        })
+}
+
+/// The `exp` claim as a timestamp.
+fn expiry_from_claims(claims: &Value) -> Option<DateTime<Utc>> {
+    claims
+        .get("exp")
+        .and_then(Value::as_i64)
+        .and_then(|exp| DateTime::from_timestamp(exp, 0))
+}
+
+/// Email and plan from id-token claims.
+fn identity_from_id_token(id_token: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(claims) = id_token.and_then(decode_jwt_claims) else {
+        return (None, None);
+    };
+    let email = non_empty(claims.get("email"))
+        .or_else(|| non_empty(claims.pointer("/https:~1~1api.openai.com~1profile/email")));
+    let plan = non_empty(claims.pointer("/https:~1~1api.openai.com~1auth/chatgpt_plan_type"))
+        .or_else(|| non_empty(claims.get("chatgpt_plan_type")));
+    (email, plan)
+}
+
+// =============================================================================
+// Usage API
+// =============================================================================
+
+/// Read `chatgpt_base_url` from Codex's `config.toml` text.
+fn parse_chatgpt_base_url(config: &str) -> Option<String> {
+    config.lines().find_map(|raw| {
+        let line = raw.split('#').next()?.trim();
+        let (key, value) = line.split_once('=')?;
+        if key.trim() != "chatgpt_base_url" {
+            return None;
+        }
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+            .unwrap_or(value)
+            .trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+/// Normalize a base URL: drop trailing slashes and add `/backend-api` to a
+/// bare `chatgpt.com` / `chat.openai.com` host.
+fn normalize_base_url(value: &str) -> String {
+    let mut base = value.trim().to_string();
+    if base.is_empty() {
+        base = DEFAULT_CHATGPT_BASE_URL.to_string();
+    }
+    while base.ends_with('/') {
+        base.pop();
+    }
+    if (base.starts_with("https://chatgpt.com") || base.starts_with("https://chat.openai.com"))
+        && !base.contains("/backend-api")
+    {
+        base.push_str("/backend-api");
+    }
+    base
+}
+
+/// The usage endpoint for a base URL.
+fn usage_url_for_base(base: &str) -> String {
+    let base = normalize_base_url(base);
+    let path = if base.contains("/backend-api") {
+        CHATGPT_USAGE_PATH
     } else {
-        Err(CautError::FetchFailed {
-            provider: "codex".to_string(),
-            reason: "Failed to get version".to_string(),
-        })
-    }
+        CODEX_USAGE_PATH
+    };
+    format!("{base}{path}")
 }
 
-/// Get credits information.
+/// The usage endpoint, honoring `chatgpt_base_url` in Codex's config.
+fn usage_url() -> String {
+    let base = codex_home()
+        .and_then(|home| fs::read_to_string(home.join("config.toml")).ok())
+        .and_then(|config| parse_chatgpt_base_url(&config))
+        .unwrap_or_else(|| DEFAULT_CHATGPT_BASE_URL.to_string());
+    usage_url_for_base(&base)
+}
+
+/// Fetch usage from `wham/usage` with OAuth credentials.
 ///
 /// # Errors
-/// Returns an error if the credits data cannot be fetched from the CLI.
-pub async fn fetch_credits() -> Result<CreditsSnapshot> {
-    // Try to get credits from the CLI
-    if let Ok(response) = try_json_rate_limit().await
-        && let Some(credits) = response.credits
-        && let Some(remaining) = credits.remaining
-    {
-        return Ok(CreditsSnapshot {
-            remaining,
-            events: vec![],
-            updated_at: Utc::now(),
+/// Returns `AuthExpired` for an expired token (the CLI strategy can refresh
+/// it), `AuthInvalid` for a rejected one, or a network/parse error.
+async fn fetch_oauth(creds: &CodexCredentials) -> Result<ProviderFetch> {
+    if creds.needs_refresh(Utc::now()) {
+        return Err(CautError::AuthExpired {
+            provider: Provider::Codex.cli_name().to_string(),
         });
     }
+    let value = request_usage(&creds.access_token, creds.account_id.as_deref()).await?;
+    let (email, plan) = identity_from_id_token(creds.id_token.as_deref());
+    Ok(map_usage_response(&value, email, plan, Utc::now()))
+}
 
-    Err(CautError::FetchFailed {
-        provider: "codex".to_string(),
-        reason: "No credits data available".to_string(),
+/// `GET` the usage endpoint.
+async fn request_usage(access_token: &str, account_id: Option<&str>) -> Result<Value> {
+    let client = common::http_client()?;
+    let mut request = client
+        .get(usage_url())
+        .bearer_auth(access_token)
+        .header("Accept", "application/json");
+    if let Some(account_id) = account_id.filter(|id| !id.is_empty()) {
+        request = request.header("ChatGPT-Account-Id", account_id);
+    }
+    common::send_json(Provider::Codex, request).await
+}
+
+/// Fetch usage with a `chatgpt.com` session cookie.
+///
+/// # Errors
+/// Returns `AuthInvalid` when the session yields no access token, or the
+/// usage request's error.
+async fn fetch_web(cookie_header: &str) -> Result<ProviderFetch> {
+    let client = common::http_client()?;
+    let session: Value = common::send_json(
+        Provider::Codex,
+        client
+            .get(CHATGPT_SESSION_URL)
+            .header("Cookie", cookie_header)
+            .header("Accept", "application/json"),
+    )
+    .await?;
+    let access_token =
+        non_empty(session.get("accessToken")).ok_or_else(|| CautError::AuthInvalid {
+            provider: Provider::Codex.cli_name().to_string(),
+            reason: "chatgpt.com session cookie is not signed in (no accessToken)".to_string(),
+        })?;
+    let account_id = decode_jwt_claims(&access_token)
+        .as_ref()
+        .and_then(account_id_from_claims);
+    let value = request_usage(&access_token, account_id.as_deref()).await?;
+    let email = non_empty(session.pointer("/user/email"));
+    Ok(map_usage_response(&value, email, None, Utc::now()))
+}
+
+// =============================================================================
+// Response mapping
+// =============================================================================
+
+/// Map a `wham/usage` response into a usage snapshot plus credits.
+fn map_usage_response(
+    value: &Value,
+    email: Option<String>,
+    token_plan: Option<String>,
+    now: DateTime<Utc>,
+) -> ProviderFetch {
+    let rate_limit = value.get("rate_limit");
+    let (primary, secondary) = normalize_windows(
+        rate_limit
+            .and_then(|r| r.get("primary_window"))
+            .and_then(window_from_snapshot),
+        rate_limit
+            .and_then(|r| r.get("secondary_window"))
+            .and_then(window_from_snapshot),
+    );
+
+    let plan = non_empty(value.get("plan_type")).or(token_plan);
+    let identity = ProviderIdentity {
+        account_email: email,
+        account_organization: None,
+        login_method: plan,
+    };
+
+    let individual_limit = first_object(value, &["individual_limit", "individualLimit"])
+        .or_else(|| {
+            rate_limit.and_then(|r| first_object(r, &["individual_limit", "individualLimit"]))
+        })
+        .or_else(|| {
+            first_object(value, &["spend_control", "spendControl"])
+                .and_then(|s| first_object(s, &["individual_limit", "individualLimit"]))
+        });
+
+    let usage = UsageSnapshot {
+        primary,
+        secondary,
+        scoped: additional_windows(value.get("additional_rate_limits")),
+        provider_cost: individual_limit.and_then(|l| credit_limit_cost(l, now)),
+        updated_at: now,
+        identity: Some(identity),
+        ..UsageSnapshot::empty()
+    };
+    let credits = value.get("credits").and_then(|c| credits_from(c, now));
+    ProviderFetch { usage, credits }
+}
+
+/// One `{used_percent, reset_at, limit_window_seconds}` window.
+fn window_from_snapshot(value: &Value) -> Option<RateWindow> {
+    let used_percent = number(value.get("used_percent"))?;
+    let seconds = number(value.get("limit_window_seconds")).unwrap_or(0.0);
+    #[allow(clippy::cast_possible_truncation)] // window lengths are small
+    let window_minutes = (seconds > 0.0).then(|| (seconds / 60.0) as i32);
+    #[allow(clippy::cast_possible_truncation)] // epoch seconds fit in i64
+    let resets_at = number(value.get("reset_at"))
+        .filter(|v| *v > 0.0)
+        .and_then(|v| DateTime::from_timestamp(v as i64, 0));
+    Some(RateWindow {
+        used_percent,
+        window_minutes,
+        resets_at,
+        reset_description: None,
     })
+}
+
+/// Which lane a window belongs to, by its length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowRole {
+    Session,
+    Weekly,
+    Unknown,
+}
+
+const fn role(window: &RateWindow) -> WindowRole {
+    match window.window_minutes {
+        Some(SESSION_WINDOW_MINUTES) => WindowRole::Session,
+        Some(WEEKLY_WINDOW_MINUTES) => WindowRole::Weekly,
+        _ => WindowRole::Unknown,
+    }
+}
+
+/// Put the session window in `primary` and the weekly one in `secondary`,
+/// whichever slot the server used (`CodexBar`'s `CodexRateWindowNormalizer`).
+fn normalize_windows(
+    primary: Option<RateWindow>,
+    secondary: Option<RateWindow>,
+) -> (Option<RateWindow>, Option<RateWindow>) {
+    match (primary, secondary) {
+        (Some(p), Some(s)) => match (role(&p), role(&s)) {
+            (WindowRole::Weekly, WindowRole::Session | WindowRole::Unknown) => (Some(s), Some(p)),
+            _ => (Some(p), Some(s)),
+        },
+        (Some(p), None) => match role(&p) {
+            WindowRole::Weekly => (None, Some(p)),
+            _ => (Some(p), None),
+        },
+        (None, Some(s)) => match role(&s) {
+            WindowRole::Weekly => (None, Some(s)),
+            _ => (Some(s), None),
+        },
+        (None, None) => (None, None),
+    }
+}
+
+/// Map `additional_rate_limits` (model-specific limits such as Codex Spark)
+/// into scoped windows.
+fn additional_windows(value: Option<&Value>) -> Vec<ScopedWindow> {
+    let Some(entries) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut used_ids: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    for entry in entries {
+        let limit_name = non_empty(entry.get("limit_name"));
+        let feature = non_empty(entry.get("metered_feature"));
+        let rate_limit = entry.get("rate_limit");
+        let primary = rate_limit.and_then(|r| r.get("primary_window"));
+        let secondary = rate_limit.and_then(|r| r.get("secondary_window"));
+
+        let is_spark = [&limit_name, &feature]
+            .iter()
+            .filter_map(|v| v.as_deref())
+            .any(|v| v.to_lowercase().contains("spark"));
+
+        let mut push = |id: String, title: String, snapshot: &Value| {
+            if used_ids.contains(&id) {
+                return;
+            }
+            if let Some(window) = window_from_snapshot(snapshot) {
+                used_ids.push(id.clone());
+                out.push(ScopedWindow {
+                    label: title,
+                    kind: Some(id),
+                    severity: None,
+                    is_active: false,
+                    window,
+                });
+            }
+        };
+
+        if is_spark {
+            for (snapshot, fallback_weekly) in [(primary, false), (secondary, true)] {
+                let Some(snapshot) = snapshot.filter(|s| s.is_object()) else {
+                    continue;
+                };
+                let minutes = number(snapshot.get("limit_window_seconds")).unwrap_or(0.0) / 60.0;
+                let weekly = if minutes > 0.0 && minutes <= 6.0 * 60.0 {
+                    false
+                } else if minutes >= 6.0 * 24.0 * 60.0 {
+                    true
+                } else {
+                    fallback_weekly
+                };
+                let (id, title) = if weekly {
+                    ("codex-spark-weekly", "Codex Spark Weekly")
+                } else {
+                    ("codex-spark", "Codex Spark 5-hour")
+                };
+                push(id.to_string(), title.to_string(), snapshot);
+            }
+            continue;
+        }
+
+        // Model-specific limits report utilization in the primary window;
+        // the secondary is a fallback.
+        let Some(snapshot) = primary.or(secondary).filter(|s| s.is_object()) else {
+            continue;
+        };
+        let Some(source) = feature.clone().or_else(|| limit_name.clone()) else {
+            continue;
+        };
+        let slug = slugify(&source);
+        if slug.is_empty() {
+            continue;
+        }
+        let title = limit_name
+            .or(feature)
+            .unwrap_or_else(|| "Codex extra limit".to_string());
+        push(format!("codex-{slug}"), title, snapshot);
+    }
+    out
+}
+
+/// Lowercase alphanumerics joined by single dashes.
+fn slugify(value: &str) -> String {
+    let mut slug = String::new();
+    for c in value.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.ends_with('-') && !slug.is_empty() {
+            slug.push('-');
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    slug
+}
+
+/// A team/business monthly credit cap as a provider cost.
+fn credit_limit_cost(limit_value: &Value, now: DateTime<Utc>) -> Option<ProviderCostSnapshot> {
+    let limit = number(limit_value.get("limit")).filter(|l| *l > 0.0)?;
+    let remaining_percent = number(
+        limit_value
+            .get("remainingPercent")
+            .or_else(|| limit_value.get("remaining_percent")),
+    );
+    let used = number(limit_value.get("used")).unwrap_or_else(|| {
+        remaining_percent.map_or(0.0, |rp| limit * (100.0 - rp).clamp(0.0, 100.0) / 100.0)
+    });
+    #[allow(clippy::cast_possible_truncation)] // epoch seconds fit in i64
+    let resets_at = ["resetsAt", "resets_at", "reset_at"]
+        .iter()
+        .find_map(|key| number(limit_value.get(*key)))
+        .filter(|v| *v > 0.0)
+        .and_then(|v| DateTime::from_timestamp(v as i64, 0));
+    Some(ProviderCostSnapshot {
+        used: used.max(0.0),
+        limit,
+        currency_code: "credits".to_string(),
+        period: Some("Monthly".to_string()),
+        resets_at,
+        updated_at: now,
+    })
+}
+
+/// Credits balance from `{has_credits, unlimited, balance}`.
+///
+/// `None` when the account has no metered credits (unlimited or none) and
+/// reports no balance.
+fn credits_from(value: &Value, now: DateTime<Utc>) -> Option<CreditsSnapshot> {
+    let has_credits = value
+        .get("has_credits")
+        .or_else(|| value.get("hasCredits"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let unlimited = value
+        .get("unlimited")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let balance = number(value.get("balance"));
+    let metered = has_credits && !unlimited;
+    if balance.is_none() && !metered {
+        return None;
+    }
+    Some(CreditsSnapshot {
+        remaining: balance.unwrap_or(0.0),
+        events: Vec::new(),
+        updated_at: now,
+    })
+}
+
+// =============================================================================
+// JSON helpers
+// =============================================================================
+
+/// A number that may be encoded as a JSON number or a numeric string.
+fn number(value: Option<&Value>) -> Option<f64> {
+    match value? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|v| v.is_finite())
+}
+
+/// A trimmed, non-empty string.
+fn non_empty(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// The first present string field among alternate spellings.
+fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| non_empty(value.get(*key)))
+}
+
+/// The first present object field among alternate spellings.
+fn first_object<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter()
+        .find_map(|key| value.get(*key).filter(|v| v.is_object()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    fn base64_url_encode(input: &str) -> String {
-        const ALPHABET: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    fn jwt(claims: &Value) -> String {
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        format!(
+            "{}.{}.sig",
+            engine.encode(br#"{"alg":"none"}"#),
+            engine.encode(claims.to_string())
+        )
+    }
 
-        let bytes = input.as_bytes();
-        let mut out = String::new();
+    fn now() -> DateTime<Utc> {
+        DateTime::from_timestamp(1_766_900_000, 0).unwrap()
+    }
 
-        let mut i = 0;
-        while i < bytes.len() {
-            let b0 = u32::from(bytes[i]);
-            let b1 = if i + 1 < bytes.len() {
-                u32::from(bytes[i + 1])
-            } else {
-                0
-            };
-            let b2 = if i + 2 < bytes.len() {
-                u32::from(bytes[i + 2])
-            } else {
-                0
-            };
+    // ---------------------------------------------------------------------
+    // Fetch plan
+    // ---------------------------------------------------------------------
 
-            let triple = (b0 << 16) | (b1 << 8) | b2;
-
-            let idx0 = ((triple >> 18) & 0x3f) as usize;
-            let idx1 = ((triple >> 12) & 0x3f) as usize;
-            let idx2 = ((triple >> 6) & 0x3f) as usize;
-            let idx3 = (triple & 0x3f) as usize;
-
-            out.push(ALPHABET[idx0] as char);
-            out.push(ALPHABET[idx1] as char);
-            if i + 1 < bytes.len() {
-                out.push(ALPHABET[idx2] as char);
-            } else {
-                out.push('=');
-            }
-            if i + 2 < bytes.len() {
-                out.push(ALPHABET[idx3] as char);
-            } else {
-                out.push('=');
-            }
-
-            i += 3;
-        }
-
-        out.replace('+', "-")
-            .replace('/', "_")
-            .trim_end_matches('=')
-            .to_string()
+    #[test]
+    fn plan_order_matches_codexbar_auto_mode() {
+        let plan = fetch_plan();
+        let ids: Vec<_> = plan.strategies.iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["codex-oauth", "codex-cli-rpc", "codex-web"]);
+        assert_eq!(plan.strategies[0].kind, FetchKind::OAuth);
+        assert_eq!(plan.strategies[1].kind, FetchKind::Cli);
+        assert_eq!(plan.strategies[2].kind, FetchKind::WebDashboard);
     }
 
     #[test]
-    fn base64_decode_basic() {
-        let decoded = base64_decode("SGVsbG8=").expect("decode");
-        assert_eq!(decoded, b"Hello");
+    fn bearer_account_routes_to_oauth_only() {
+        let plan = fetch_plan();
+        let ctx = FetchContext::with_account("work", format!("Bearer {}", jwt(&json!({"exp": 1}))));
+        assert!((plan.strategies[0].is_available)(&ctx));
+        assert!(!(plan.strategies[1].is_available)(&ctx));
+        assert!(!(plan.strategies[2].is_available)(&ctx));
     }
 
     #[test]
-    fn decode_jwt_payload_parses_claims() {
-        let header = base64_url_encode(r#"{"alg":"none"}"#);
-        let payload_json = r#"{"email":"test@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":"pro","organizations":[{"title":"Acme","is_default":true}]}}"#;
-        let payload = base64_url_encode(payload_json);
-        let token = format!("{header}.{payload}.signature");
-
-        let claims = decode_jwt_payload(&token).expect("claims");
-        assert_eq!(claims.email.as_deref(), Some("test@example.com"));
-
-        let openai_auth = claims.openai_auth.expect("openai_auth");
-        assert_eq!(openai_auth.chatgpt_plan_type.as_deref(), Some("pro"));
-        let org = openai_auth
-            .organizations
-            .unwrap()
-            .into_iter()
-            .find(|o| o.is_default == Some(true))
-            .and_then(|o| o.title);
-        assert_eq!(org.as_deref(), Some("Acme"));
-    }
-
-    #[test]
-    fn decode_jwt_payload_invalid_format_returns_none() {
-        assert!(decode_jwt_payload("not-a-jwt").is_none());
-    }
-
-    #[test]
-    fn parse_rate_limit_response_sets_windows() {
-        let response = CodexRateLimitResponse {
-            rate_limit: Some(CodexRateLimit {
-                remaining_percent: Some(60.0),
-                resets_at: Some("2026-01-18T00:00:00Z".to_string()),
-                weekly_remaining_percent: Some(20.0),
-                weekly_resets_at: Some("2026-01-25T00:00:00Z".to_string()),
-            }),
-            credits: None,
-            user: Some(CodexUser {
-                email: Some("user@example.com".to_string()),
-                plan: Some("pro".to_string()),
-            }),
-        };
-
-        let snapshot = parse_rate_limit_response(&response, None);
-        let primary = snapshot.primary.expect("primary");
-        let secondary = snapshot.secondary.expect("secondary");
-
-        assert!((primary.used_percent - 40.0).abs() < f64::EPSILON);
-        assert!((secondary.used_percent - 80.0).abs() < f64::EPSILON);
-        assert_eq!(
-            snapshot.identity.and_then(|i| i.account_email).as_deref(),
-            Some("user@example.com")
+    fn cookie_account_routes_to_web_only() {
+        let plan = fetch_plan();
+        let ctx = FetchContext::with_account(
+            "work",
+            "Cookie: __Secure-next-auth.session-token=abc; other=1",
         );
-        assert!(primary.resets_at.is_some());
-        assert!(secondary.resets_at.is_some());
-    }
-
-    // =========================================================================
-    // Additional base64 decode tests
-    // =========================================================================
-
-    #[test]
-    fn base64_decode_empty_string() {
-        let decoded = base64_decode("").expect("decode empty");
-        assert!(decoded.is_empty());
-    }
-
-    #[test]
-    fn base64_decode_with_padding_variations() {
-        // No padding needed (multiple of 4)
-        let decoded = base64_decode("YWJj").expect("decode abc");
-        assert_eq!(decoded, b"abc");
-
-        // Single padding
-        let decoded = base64_decode("YWI=").expect("decode ab");
-        assert_eq!(decoded, b"ab");
-
-        // Double padding
-        let decoded = base64_decode("YQ==").expect("decode a");
-        assert_eq!(decoded, b"a");
-    }
-
-    #[test]
-    fn base64_decode_invalid_character_returns_none() {
-        // Invalid character that's not in base64 alphabet
-        assert!(base64_decode("!!!").is_none());
-        assert!(base64_decode("abc$def").is_none());
-    }
-
-    #[test]
-    fn base64_decode_longer_text() {
-        // "The quick brown fox jumps over the lazy dog"
-        let encoded = "VGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcyBvdmVyIHRoZSBsYXp5IGRvZw==";
-        let decoded = base64_decode(encoded).expect("decode long text");
+        assert!(!(plan.strategies[0].is_available)(&ctx));
+        assert!(!(plan.strategies[1].is_available)(&ctx));
+        assert!((plan.strategies[2].is_available)(&ctx));
         assert_eq!(
-            String::from_utf8(decoded).unwrap(),
-            "The quick brown fox jumps over the lazy dog"
+            cookie_header_for(&ctx).as_deref(),
+            Some("__Secure-next-auth.session-token=abc; other=1")
         );
     }
 
-    // =========================================================================
-    // Additional JWT decode tests
-    // =========================================================================
-
     #[test]
-    fn decode_jwt_payload_too_few_parts() {
-        assert!(decode_jwt_payload("only.two").is_none());
-        assert!(decode_jwt_payload("just-one-part").is_none());
-        assert!(decode_jwt_payload("").is_none());
+    fn oauth_fallback_only_for_repairable_errors() {
+        assert!(oauth_should_fallback(&CautError::AuthExpired {
+            provider: "codex".into()
+        }));
+        assert!(oauth_should_fallback(&CautError::AuthInvalid {
+            provider: "codex".into(),
+            reason: "401".into()
+        }));
+        assert!(!oauth_should_fallback(&CautError::Network("down".into())));
+        assert!(!oauth_should_fallback(&CautError::ParseResponse(
+            "bad".into()
+        )));
     }
 
-    #[test]
-    fn decode_jwt_payload_too_many_parts() {
-        let header = base64_url_encode(r#"{"alg":"none"}"#);
-        let payload = base64_url_encode(r#"{"email":"test@example.com"}"#);
-        let token = format!("{header}.{payload}.sig.extra.parts");
-        assert!(decode_jwt_payload(&token).is_none());
-    }
+    // ---------------------------------------------------------------------
+    // Credentials
+    // ---------------------------------------------------------------------
 
     #[test]
-    fn decode_jwt_payload_invalid_base64_payload() {
-        let header = base64_url_encode(r#"{"alg":"none"}"#);
-        let token = format!("{header}.!!invalid-base64!!.signature");
-        assert!(decode_jwt_payload(&token).is_none());
-    }
-
-    #[test]
-    fn decode_jwt_payload_invalid_json_payload() {
-        let header = base64_url_encode(r#"{"alg":"none"}"#);
-        let payload = base64_url_encode("not valid json {{{");
-        let token = format!("{header}.{payload}.signature");
-        assert!(decode_jwt_payload(&token).is_none());
-    }
-
-    #[test]
-    fn decode_jwt_payload_minimal_claims() {
-        let header = base64_url_encode(r#"{"alg":"none"}"#);
-        let payload = base64_url_encode(r"{}");
-        let token = format!("{header}.{payload}.signature");
-
-        let claims = decode_jwt_payload(&token).expect("claims");
-        assert!(claims.email.is_none());
-        assert!(claims.openai_auth.is_none());
-    }
-
-    #[test]
-    fn decode_jwt_payload_with_multiple_organizations() {
-        let header = base64_url_encode(r#"{"alg":"HS256"}"#);
-        let payload_json = r#"{
-            "email":"multi@example.com",
-            "https://api.openai.com/auth":{
-                "chatgpt_plan_type":"plus",
-                "organizations":[
-                    {"title":"Org1","is_default":false},
-                    {"title":"DefaultOrg","is_default":true},
-                    {"title":"Org3","is_default":false}
-                ]
-            }
-        }"#;
-        let payload = base64_url_encode(payload_json);
-        let token = format!("{header}.{payload}.signature");
-
-        let claims = decode_jwt_payload(&token).expect("claims");
-        assert_eq!(claims.email.as_deref(), Some("multi@example.com"));
-
-        let openai_auth = claims.openai_auth.expect("openai_auth");
-        let orgs = openai_auth.organizations.expect("organizations");
-        assert_eq!(orgs.len(), 3);
-
-        let default_org = orgs.iter().find(|o| o.is_default == Some(true));
-        assert_eq!(
-            default_org.and_then(|o| o.title.as_deref()),
-            Some("DefaultOrg")
-        );
-    }
-
-    // =========================================================================
-    // Rate limit response edge case tests
-    // =========================================================================
-
-    #[test]
-    fn parse_rate_limit_response_empty_response() {
-        let response = CodexRateLimitResponse {
-            rate_limit: None,
-            credits: None,
-            user: None,
-        };
-
-        let snapshot = parse_rate_limit_response(&response, None);
-        assert!(snapshot.primary.is_none());
-        assert!(snapshot.secondary.is_none());
-        assert!(snapshot.tertiary.is_none());
-        // Identity should still be set with login_method
-        let identity = snapshot.identity.expect("identity");
-        assert_eq!(identity.login_method.as_deref(), Some("cli"));
-    }
-
-    #[test]
-    fn parse_rate_limit_response_only_primary() {
-        let response = CodexRateLimitResponse {
-            rate_limit: Some(CodexRateLimit {
-                remaining_percent: Some(75.0),
-                resets_at: None,
-                weekly_remaining_percent: None,
-                weekly_resets_at: None,
-            }),
-            credits: None,
-            user: None,
-        };
-
-        let snapshot = parse_rate_limit_response(&response, None);
-        let primary = snapshot.primary.expect("primary");
-        assert!((primary.used_percent - 25.0).abs() < f64::EPSILON);
-        assert!(primary.resets_at.is_none());
-        assert!(snapshot.secondary.is_none());
-    }
-
-    #[test]
-    fn parse_rate_limit_response_only_secondary() {
-        let response = CodexRateLimitResponse {
-            rate_limit: Some(CodexRateLimit {
-                remaining_percent: None,
-                resets_at: None,
-                weekly_remaining_percent: Some(50.0),
-                weekly_resets_at: Some("2026-01-25T12:00:00Z".to_string()),
-            }),
-            credits: None,
-            user: None,
-        };
-
-        let snapshot = parse_rate_limit_response(&response, None);
-        assert!(snapshot.primary.is_none());
-        let secondary = snapshot.secondary.expect("secondary");
-        assert!((secondary.used_percent - 50.0).abs() < f64::EPSILON);
-        assert_eq!(secondary.window_minutes, Some(10080)); // 7 days
-        assert!(secondary.resets_at.is_some());
-    }
-
-    #[test]
-    fn parse_rate_limit_response_invalid_resets_at_format() {
-        let response = CodexRateLimitResponse {
-            rate_limit: Some(CodexRateLimit {
-                remaining_percent: Some(80.0),
-                resets_at: Some("not-a-valid-timestamp".to_string()),
-                weekly_remaining_percent: None,
-                weekly_resets_at: None,
-            }),
-            credits: None,
-            user: None,
-        };
-
-        let snapshot = parse_rate_limit_response(&response, None);
-        let primary = snapshot.primary.expect("primary");
-        assert!((primary.used_percent - 20.0).abs() < f64::EPSILON);
-        // Invalid timestamp should result in None
-        assert!(primary.resets_at.is_none());
-    }
-
-    #[test]
-    fn parse_rate_limit_response_boundary_percentages() {
-        // Test 0% remaining (100% used)
-        let response = CodexRateLimitResponse {
-            rate_limit: Some(CodexRateLimit {
-                remaining_percent: Some(0.0),
-                resets_at: None,
-                weekly_remaining_percent: Some(100.0),
-                weekly_resets_at: None,
-            }),
-            credits: None,
-            user: None,
-        };
-
-        let snapshot = parse_rate_limit_response(&response, None);
-        let primary = snapshot.primary.expect("primary");
-        let secondary = snapshot.secondary.expect("secondary");
-        assert!((primary.used_percent - 100.0).abs() < f64::EPSILON);
-        assert!((secondary.used_percent - 0.0).abs() < f64::EPSILON);
-    }
-
-    // =========================================================================
-    // Fetch plan tests
-    // =========================================================================
-
-    #[test]
-    fn fetch_plan_has_correct_provider() {
-        let plan = fetch_plan();
-        assert_eq!(plan.provider, Provider::Codex);
-    }
-
-    #[test]
-    fn fetch_plan_has_expected_strategies() {
-        let plan = fetch_plan();
-        assert_eq!(plan.strategies.len(), 2);
-
-        // First strategy should be web dashboard
-        assert_eq!(plan.strategies[0].id, "codex-web-dashboard");
-        assert!(matches!(plan.strategies[0].kind, FetchKind::WebDashboard));
-
-        // Second strategy should be CLI
-        assert_eq!(plan.strategies[1].id, "codex-cli-rpc");
-        assert!(matches!(plan.strategies[1].kind, FetchKind::Cli));
-    }
-
-    #[test]
-    fn fetch_plan_web_dashboard_availability_checks_os() {
-        let plan = fetch_plan();
-        let web_strategy = &plan.strategies[0];
-
-        // On non-macOS, web dashboard should not be available
-        #[cfg(not(target_os = "macos"))]
-        assert!(!(web_strategy.is_available)(&FetchContext::default()));
-
-        // On macOS, it should be available (regardless of cookies)
-        #[cfg(target_os = "macos")]
-        assert!((web_strategy.is_available)(&FetchContext::default()));
-    }
-
-    #[test]
-    fn fetch_plan_cli_fallback_behavior() {
-        let plan = fetch_plan();
-
-        // Web dashboard should fallback on any error
-        let web_strategy = &plan.strategies[0];
-        assert!((web_strategy.should_fallback)(
-            &crate::error::CautError::FetchFailed {
-                provider: "codex".to_string(),
-                reason: "test".to_string(),
-            }
-        ));
-
-        // CLI should not fallback (it's the last resort)
-        let cli_strategy = &plan.strategies[1];
-        assert!(!(cli_strategy.should_fallback)(
-            &crate::error::CautError::FetchFailed {
-                provider: "codex".to_string(),
-                reason: "test".to_string(),
-            }
-        ));
-    }
-
-    // =========================================================================
-    // Auth JSON parsing tests
-    // =========================================================================
-
-    #[test]
-    fn parse_auth_json_with_api_key_only() {
-        let json = r#"{"OPENAI_API_KEY": "sk-test-key-123"}"#;
-        let auth: CodexAuthJson = serde_json::from_str(json).expect("parse");
-        assert_eq!(auth.openai_api_key.as_deref(), Some("sk-test-key-123"));
-        assert!(auth.tokens.is_none());
-    }
-
-    #[test]
-    fn parse_auth_json_with_oauth_tokens() {
-        let json = r#"{
-            "tokens": {
-                "id_token": "test.jwt.token",
-                "access_token": "acc_123",
-                "refresh_token": "ref_456",
-                "account_id": "acct_789"
-            }
-        }"#;
-        let auth: CodexAuthJson = serde_json::from_str(json).expect("parse");
-        assert!(auth.openai_api_key.is_none());
-        let tokens = auth.tokens.expect("tokens");
-        assert_eq!(tokens.id_token.as_deref(), Some("test.jwt.token"));
-        assert_eq!(tokens.account_id.as_deref(), Some("acct_789"));
-    }
-
-    #[test]
-    fn parse_auth_json_with_both_methods() {
-        let json = r#"{
-            "OPENAI_API_KEY": "sk-test",
-            "tokens": {
-                "id_token": "jwt.here",
-                "account_id": "acct_123"
-            }
-        }"#;
-        let auth: CodexAuthJson = serde_json::from_str(json).expect("parse");
-        assert!(auth.openai_api_key.is_some());
-        assert!(auth.tokens.is_some());
-    }
-
-    #[test]
-    fn parse_auth_json_empty() {
-        let json = r"{}";
-        let auth: CodexAuthJson = serde_json::from_str(json).expect("parse");
-        assert!(auth.openai_api_key.is_none());
-        assert!(auth.tokens.is_none());
-        assert!(auth.last_refresh.is_none());
-    }
-
-    #[test]
-    fn parse_auth_json_with_last_refresh() {
-        let json = r#"{"last_refresh": "2026-01-18T10:00:00.000Z"}"#;
-        let auth: CodexAuthJson = serde_json::from_str(json).expect("parse");
-        assert_eq!(
-            auth.last_refresh.as_deref(),
-            Some("2026-01-18T10:00:00.000Z")
-        );
-    }
-
-    // =========================================================================
-    // JWT claims structure tests
-    // =========================================================================
-
-    #[test]
-    fn parse_jwt_claims_with_all_fields() {
-        let json = r#"{
+    fn parse_auth_json_reads_tokens_and_jwt_account() {
+        let id_token = jwt(&json!({
             "email": "user@example.com",
-            "email_verified": true,
-            "https://api.openai.com/auth": {
-                "chatgpt_account_id": "acct_123",
-                "chatgpt_plan_type": "pro",
-                "chatgpt_user_id": "user_456",
-                "chatgpt_subscription_active_start": "2026-01-01T00:00:00Z",
-                "chatgpt_subscription_active_until": "2026-02-01T00:00:00Z",
-                "chatgpt_subscription_last_checked": "2026-01-18T12:00:00Z",
-                "organizations": [
-                    {"id": "org_1", "title": "Personal", "role": "owner", "is_default": true},
-                    {"id": "org_2", "title": "Work", "role": "member", "is_default": false}
-                ]
-            }
-        }"#;
-        let claims: JwtClaims = serde_json::from_str(json).expect("parse claims");
-
-        assert_eq!(claims.email.as_deref(), Some("user@example.com"));
-        assert_eq!(claims.email_verified, Some(true));
-
-        let auth = claims.openai_auth.expect("openai_auth");
-        assert_eq!(auth.chatgpt_plan_type.as_deref(), Some("pro"));
-        assert_eq!(auth.chatgpt_account_id.as_deref(), Some("acct_123"));
-
-        let orgs = auth.organizations.expect("organizations");
-        assert_eq!(orgs.len(), 2);
-
-        let default_org = orgs.iter().find(|o| o.is_default == Some(true));
-        assert!(default_org.is_some());
-        assert_eq!(default_org.unwrap().title.as_deref(), Some("Personal"));
-    }
-
-    #[test]
-    fn parse_jwt_claims_minimal() {
-        let json = r#"{"email": "test@test.com"}"#;
-        let claims: JwtClaims = serde_json::from_str(json).expect("parse claims");
-        assert_eq!(claims.email.as_deref(), Some("test@test.com"));
-        assert!(claims.openai_auth.is_none());
-    }
-
-    #[test]
-    fn parse_jwt_claims_empty_openai_auth() {
-        let json = r#"{"https://api.openai.com/auth": {}}"#;
-        let claims: JwtClaims = serde_json::from_str(json).expect("parse claims");
-        assert!(claims.email.is_none());
-        let auth = claims.openai_auth.expect("openai_auth");
-        assert!(auth.chatgpt_plan_type.is_none());
-        assert!(auth.organizations.is_none());
-    }
-
-    // =========================================================================
-    // Real fixture JWT decode test
-    // =========================================================================
-
-    #[test]
-    fn decode_fixture_jwt_token() {
-        // This JWT is from tests/fixtures/codex/auth_oauth.json
-        // It contains: email=user@example.com, plan=pro, org=Personal
-        let token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfcGxhbl90eXBlIjoicHJvIiwiY2hhdGdwdF9zdWJzY3JpcHRpb25fYWN0aXZlX3VudGlsIjoiMjAyNi0wMi0wMVQwMDowMDowMFoiLCJvcmdhbml6YXRpb25zIjpbeyJ0aXRsZSI6IlBlcnNvbmFsIiwiaXNfZGVmYXVsdCI6dHJ1ZX1dfX0.sig";
-
-        let claims = decode_jwt_payload(token).expect("decode fixture JWT");
-
-        assert_eq!(claims.email.as_deref(), Some("user@example.com"));
-        assert_eq!(claims.email_verified, Some(true));
-
-        let openai_auth = claims.openai_auth.expect("openai_auth present");
-        assert_eq!(openai_auth.chatgpt_plan_type.as_deref(), Some("pro"));
+            "https://api.openai.com/auth": {"chatgpt_account_id": "acct-jwt", "chatgpt_plan_type": "pro"}
+        }));
+        let access = jwt(&json!({"exp": 2_000_000_000}));
+        let content = json!({
+            "OPENAI_API_KEY": null,
+            "tokens": {"id_token": id_token, "access_token": access, "refresh_token": "r"}
+        })
+        .to_string();
+        let creds = parse_auth_json(&content).unwrap();
+        assert_eq!(creds.account_id.as_deref(), Some("acct-jwt"));
+        assert_eq!(creds.expires_at, DateTime::from_timestamp(2_000_000_000, 0));
+        assert!(!creds.needs_refresh(now()));
         assert_eq!(
-            openai_auth.chatgpt_subscription_active_until.as_deref(),
-            Some("2026-02-01T00:00:00Z")
-        );
-
-        let orgs = openai_auth.organizations.expect("orgs present");
-        assert_eq!(orgs.len(), 1);
-        assert_eq!(orgs[0].title.as_deref(), Some("Personal"));
-        assert_eq!(orgs[0].is_default, Some(true));
-    }
-
-    // =========================================================================
-    // Subscription info extraction tests
-    // =========================================================================
-
-    #[test]
-    fn subscription_info_from_claims() {
-        let header = base64_url_encode(r#"{"alg":"none"}"#);
-        let payload_json = r#"{
-            "email": "sub@example.com",
-            "https://api.openai.com/auth": {
-                "chatgpt_plan_type": "plus",
-                "chatgpt_subscription_active_start": "2026-01-01T00:00:00Z",
-                "chatgpt_subscription_active_until": "2026-12-31T23:59:59Z",
-                "chatgpt_subscription_last_checked": "2026-01-18T10:00:00Z"
-            }
-        }"#;
-        let payload = base64_url_encode(payload_json);
-        let token = format!("{header}.{payload}.sig");
-
-        let claims = decode_jwt_payload(&token).expect("claims");
-        let auth = claims.openai_auth.expect("auth");
-
-        // These would be extracted into SubscriptionInfo
-        assert_eq!(auth.chatgpt_plan_type.as_deref(), Some("plus"));
-        assert_eq!(
-            auth.chatgpt_subscription_active_start.as_deref(),
-            Some("2026-01-01T00:00:00Z")
-        );
-        assert_eq!(
-            auth.chatgpt_subscription_active_until.as_deref(),
-            Some("2026-12-31T23:59:59Z")
-        );
-    }
-
-    // =========================================================================
-    // Organization structure tests
-    // =========================================================================
-
-    #[test]
-    fn parse_organization_with_all_fields() {
-        let json = r#"{
-            "id": "org_abc123",
-            "title": "My Company",
-            "role": "admin",
-            "is_default": false
-        }"#;
-        let org: OpenAiOrganization = serde_json::from_str(json).expect("parse org");
-        assert_eq!(org.id.as_deref(), Some("org_abc123"));
-        assert_eq!(org.title.as_deref(), Some("My Company"));
-        assert_eq!(org.role.as_deref(), Some("admin"));
-        assert_eq!(org.is_default, Some(false));
-    }
-
-    #[test]
-    fn parse_organization_minimal() {
-        let json = r#"{"title": "Test"}"#;
-        let org: OpenAiOrganization = serde_json::from_str(json).expect("parse org");
-        assert!(org.id.is_none());
-        assert_eq!(org.title.as_deref(), Some("Test"));
-        assert!(org.is_default.is_none());
-    }
-
-    // =========================================================================
-    // Rate limit response deserialization tests
-    // =========================================================================
-
-    #[test]
-    fn parse_rate_limit_response_camel_case() {
-        let json = r#"{
-            "rateLimit": {
-                "remainingPercent": 65.5,
-                "resetsAt": "2026-01-18T15:00:00Z",
-                "weeklyRemainingPercent": 30.0,
-                "weeklyResetsAt": "2026-01-25T00:00:00Z"
-            },
-            "credits": {
-                "remaining": 50.25
-            },
-            "user": {
-                "email": "camel@example.com",
-                "plan": "enterprise"
-            }
-        }"#;
-        let response: CodexRateLimitResponse = serde_json::from_str(json).expect("parse");
-
-        let rl = response.rate_limit.expect("rate_limit");
-        assert!((rl.remaining_percent.unwrap() - 65.5).abs() < f64::EPSILON);
-        assert!((rl.weekly_remaining_percent.unwrap() - 30.0).abs() < f64::EPSILON);
-
-        let credits = response.credits.expect("credits");
-        assert!((credits.remaining.unwrap() - 50.25).abs() < f64::EPSILON);
-
-        let user = response.user.expect("user");
-        assert_eq!(user.email.as_deref(), Some("camel@example.com"));
-        assert_eq!(user.plan.as_deref(), Some("enterprise"));
-    }
-
-    #[test]
-    fn parse_rate_limit_response_null_fields() {
-        let json = r#"{
-            "rateLimit": {
-                "remainingPercent": null,
-                "resetsAt": null,
-                "weeklyRemainingPercent": null,
-                "weeklyResetsAt": null
-            },
-            "credits": null,
-            "user": null
-        }"#;
-        let response: CodexRateLimitResponse = serde_json::from_str(json).expect("parse");
-
-        let rl = response.rate_limit.expect("rate_limit");
-        assert!(rl.remaining_percent.is_none());
-        assert!(rl.resets_at.is_none());
-        assert!(response.credits.is_none());
-        assert!(response.user.is_none());
-    }
-
-    // =========================================================================
-    // Source label constants tests
-    // =========================================================================
-
-    #[test]
-    fn source_labels_are_correct() {
-        assert_eq!(SOURCE_WEB, "openai-web");
-        assert_eq!(SOURCE_CLI, "codex-cli");
-    }
-
-    // =========================================================================
-    // CODEX_HOME env var tests (issue #6)
-    // =========================================================================
-
-    static CODEX_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// Sets an env var for the duration of its scope and restores the
-    /// previous value (or removes if there was none) on Drop. Guards
-    /// against test-panic env-var leakage.
-    struct EnvVarGuard {
-        key: &'static str,
-        original: Option<String>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let original = std::env::var(key).ok();
-            // SAFETY: all call sites in this module hold CODEX_HOME_LOCK for
-            // the duration of the guard, so no other test is racing on the
-            // same env var.
-            #[allow(unsafe_code)]
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            #[allow(unsafe_code)]
-            unsafe {
-                match self.original.take() {
-                    Some(v) => std::env::set_var(self.key, v),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn get_codex_dir_honors_codex_home_env() {
-        let _lock = CODEX_HOME_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let _env = EnvVarGuard::set("CODEX_HOME", "/tmp/codex-alt-account");
-
-        assert_eq!(
-            get_codex_dir(),
-            Some(PathBuf::from("/tmp/codex-alt-account"))
+            identity_from_id_token(creds.id_token.as_deref()),
+            (Some("user@example.com".into()), Some("pro".into()))
         );
     }
 
     #[test]
-    fn get_codex_dir_ignores_empty_env_and_falls_back_to_default() {
-        let _lock = CODEX_HOME_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let _env = EnvVarGuard::set("CODEX_HOME", "");
+    fn parse_auth_json_prefers_explicit_account_id_and_camel_case() {
+        let content = json!({
+            "tokens": {"accessToken": "opaque", "refreshToken": "r", "accountId": "acct-1"}
+        })
+        .to_string();
+        let creds = parse_auth_json(&content).unwrap();
+        assert_eq!(creds.access_token, "opaque");
+        assert_eq!(creds.account_id.as_deref(), Some("acct-1"));
+        assert_eq!(creds.expires_at, None);
+    }
 
-        let expected = directories::BaseDirs::new().map(|d| d.home_dir().join(".codex"));
-        assert_eq!(get_codex_dir(), expected);
+    #[test]
+    fn parse_auth_json_rejects_api_key_only_and_garbage() {
+        assert!(parse_auth_json(r#"{"OPENAI_API_KEY": "sk-123"}"#).is_none());
+        assert!(parse_auth_json(r#"{"tokens": {"access_token": ""}}"#).is_none());
+        assert!(parse_auth_json("not json").is_none());
+    }
+
+    #[test]
+    fn parse_auth_json_reads_repo_fixture() {
+        let content = include_str!("../../../tests/fixtures/codex/auth_oauth.json");
+        let creds = parse_auth_json(content).unwrap();
+        assert_eq!(creds.account_id.as_deref(), Some("acct_test_123456"));
+        let (email, plan) = identity_from_id_token(creds.id_token.as_deref());
+        assert_eq!(email.as_deref(), Some("user@example.com"));
+        assert_eq!(plan.as_deref(), Some("pro"));
+    }
+
+    #[test]
+    fn expired_token_needs_refresh() {
+        let creds = CodexCredentials::from_access_token(&jwt(&json!({"exp": 1_766_900_100})));
+        assert!(creds.needs_refresh(now()), "within the 5-minute margin");
+        let creds = CodexCredentials::from_access_token(&jwt(&json!({"exp": 1_766_990_000})));
+        assert!(!creds.needs_refresh(now()));
+        let creds = CodexCredentials::from_access_token("opaque-token");
+        assert!(
+            !creds.needs_refresh(now()),
+            "no exp claim: let the server decide"
+        );
+    }
+
+    #[test]
+    fn account_id_from_org_claims() {
+        let claims = json!({"organizations": [{"id": ""}, {"id": "org-2"}]});
+        assert_eq!(account_id_from_claims(&claims).as_deref(), Some("org-2"));
+        assert_eq!(account_id_from_claims(&json!({})), None);
+    }
+
+    #[test]
+    fn decode_jwt_rejects_malformed_tokens() {
+        assert!(decode_jwt_claims("a.b").is_none());
+        assert!(decode_jwt_claims("a.b.c.d").is_none());
+        assert!(decode_jwt_claims("a.!!!.c").is_none());
+    }
+
+    // ---------------------------------------------------------------------
+    // Base URL
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn base_url_parsing_and_normalization() {
+        let config = "model = \"o3\"\n# chatgpt_base_url = \"ignored\"\nchatgpt_base_url = 'https://chatgpt.com/' # trailing\n";
+        assert_eq!(
+            parse_chatgpt_base_url(config).as_deref(),
+            Some("https://chatgpt.com/")
+        );
+        assert_eq!(parse_chatgpt_base_url("model = 'x'"), None);
+        assert_eq!(
+            usage_url_for_base("https://chatgpt.com/"),
+            "https://chatgpt.com/backend-api/wham/usage"
+        );
+        assert_eq!(
+            usage_url_for_base(DEFAULT_CHATGPT_BASE_URL),
+            "https://chatgpt.com/backend-api/wham/usage"
+        );
+        assert_eq!(
+            usage_url_for_base("https://proxy.example.com/"),
+            "https://proxy.example.com/api/codex/usage"
+        );
+        assert_eq!(
+            usage_url_for_base(""),
+            "https://chatgpt.com/backend-api/wham/usage"
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Usage mapping
+    // ---------------------------------------------------------------------
+
+    fn spark_response() -> Value {
+        json!({
+          "plan_type": "pro",
+          "rate_limit": {
+            "primary_window": {"used_percent": 22, "reset_at": 1_766_948_068, "limit_window_seconds": 18000},
+            "secondary_window": {"used_percent": 43, "reset_at": 1_767_407_914, "limit_window_seconds": 604_800}
+          },
+          "additional_rate_limits": [{
+            "limit_name": "GPT-5.3-Codex-Spark",
+            "metered_feature": "gpt_5_3_codex_spark",
+            "rate_limit": {
+              "primary_window": {"used_percent": 30, "reset_at": 1_766_948_068, "limit_window_seconds": 18000},
+              "secondary_window": {"used_percent": 100, "reset_at": 1_767_407_914, "limit_window_seconds": 604_800}
+            }
+          }],
+          "credits": {"has_credits": true, "unlimited": false, "balance": "12.5"}
+        })
+    }
+
+    #[test]
+    fn maps_windows_spark_and_credits() {
+        let fetch = map_usage_response(&spark_response(), Some("a@b.c".into()), None, now());
+        let usage = fetch.usage;
+        let primary = usage.primary.unwrap();
+        assert!((primary.used_percent - 22.0).abs() < f64::EPSILON);
+        assert_eq!(primary.window_minutes, Some(300));
+        assert_eq!(
+            primary.resets_at,
+            DateTime::from_timestamp(1_766_948_068, 0)
+        );
+        let secondary = usage.secondary.unwrap();
+        assert!((secondary.used_percent - 43.0).abs() < f64::EPSILON);
+        assert_eq!(secondary.window_minutes, Some(10_080));
+
+        assert_eq!(usage.scoped.len(), 2);
+        assert_eq!(usage.scoped[0].label, "Codex Spark 5-hour");
+        assert_eq!(usage.scoped[0].kind.as_deref(), Some("codex-spark"));
+        assert_eq!(usage.scoped[1].label, "Codex Spark Weekly");
+        assert!(usage.scoped[1].is_exhausted());
+
+        let identity = usage.identity.unwrap();
+        assert_eq!(identity.account_email.as_deref(), Some("a@b.c"));
+        assert_eq!(identity.login_method.as_deref(), Some("pro"));
+
+        let credits = fetch.credits.unwrap();
+        assert!((credits.remaining - 12.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn swaps_windows_reported_in_the_wrong_slots() {
+        let value = json!({"rate_limit": {
+            "primary_window": {"used_percent": 70, "reset_at": 0, "limit_window_seconds": 604_800},
+            "secondary_window": {"used_percent": 10, "reset_at": 0, "limit_window_seconds": 18000}
+        }});
+        let usage = map_usage_response(&value, None, Some("plus".into()), now()).usage;
+        assert_eq!(usage.primary.as_ref().unwrap().window_minutes, Some(300));
+        assert_eq!(
+            usage.secondary.as_ref().unwrap().window_minutes,
+            Some(10_080)
+        );
+        assert_eq!(
+            usage.primary.unwrap().resets_at,
+            None,
+            "reset_at 0 means unknown"
+        );
+        assert_eq!(
+            usage.identity.unwrap().login_method.as_deref(),
+            Some("plus"),
+            "token plan fills in when the response has none"
+        );
+    }
+
+    #[test]
+    fn lone_weekly_window_lands_in_secondary() {
+        let value = json!({"rate_limit": {
+            "primary_window": {"used_percent": 5, "reset_at": 1, "limit_window_seconds": 604_800},
+            "secondary_window": null
+        }});
+        let usage = map_usage_response(&value, None, None, now()).usage;
+        assert!(usage.primary.is_none());
+        assert!(usage.secondary.is_some());
+    }
+
+    #[test]
+    fn missing_or_malformed_windows_do_not_fail() {
+        let value = json!({"rate_limit": {"primary_window": {"reset_at": 1}}, "plan_type": "free"});
+        let fetch = map_usage_response(&value, None, None, now());
+        assert!(fetch.usage.primary.is_none());
+        assert!(fetch.usage.secondary.is_none());
+        assert!(!fetch.usage.has_quota());
+        assert!(fetch.credits.is_none());
+        let empty = map_usage_response(&json!({}), None, None, now());
+        assert!(!empty.usage.has_quota());
+    }
+
+    #[test]
+    fn generic_additional_limit_uses_slug_and_title() {
+        let value = json!({"additional_rate_limits": [
+            {"limit_name": "Code Review", "metered_feature": "code_review",
+             "rate_limit": {"primary_window": {"used_percent": 12.5, "reset_at": 0, "limit_window_seconds": 0}}},
+            {"limit_name": "Dup", "metered_feature": "code_review",
+             "rate_limit": {"primary_window": {"used_percent": 99, "reset_at": 0, "limit_window_seconds": 0}}},
+            {"limit_name": "", "metered_feature": null, "rate_limit": {"primary_window": {"used_percent": 1}}},
+            "not an object"
+        ]});
+        let scoped = map_usage_response(&value, None, None, now()).usage.scoped;
+        assert_eq!(
+            scoped.len(),
+            1,
+            "duplicates and unnamed entries are dropped"
+        );
+        assert_eq!(scoped[0].label, "Code Review");
+        assert_eq!(scoped[0].kind.as_deref(), Some("codex-code-review"));
+        assert_eq!(scoped[0].window.window_minutes, None);
+    }
+
+    #[test]
+    fn individual_limit_becomes_monthly_credit_cost() {
+        let value = json!({
+            "spend_control": {"individual_limit": {"limit": "1000", "remaining_percent": 25, "reset_at": 1_767_000_000}}
+        });
+        let cost = map_usage_response(&value, None, None, now())
+            .usage
+            .provider_cost
+            .unwrap();
+        assert!((cost.limit - 1000.0).abs() < f64::EPSILON);
+        assert!((cost.used - 750.0).abs() < f64::EPSILON);
+        assert_eq!(cost.currency_code, "credits");
+        assert_eq!(cost.resets_at, DateTime::from_timestamp(1_767_000_000, 0));
+
+        // Root wins over rate_limit, which wins over spend_control.
+        let value = json!({
+            "individual_limit": {"limit": 10, "used": 3},
+            "rate_limit": {"individual_limit": {"limit": 20, "used": 4}},
+            "spend_control": {"individual_limit": {"limit": 30, "used": 5}}
+        });
+        let cost = map_usage_response(&value, None, None, now())
+            .usage
+            .provider_cost
+            .unwrap();
+        assert!((cost.limit - 10.0).abs() < f64::EPSILON);
+
+        // A zero cap is no cap.
+        let value = json!({"individual_limit": {"limit": 0, "used": 3}});
+        assert!(
+            map_usage_response(&value, None, None, now())
+                .usage
+                .provider_cost
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn credits_rules() {
+        assert!(credits_from(&json!({"has_credits": false, "unlimited": false}), now()).is_none());
+        assert!(credits_from(&json!({"has_credits": true, "unlimited": true}), now()).is_none());
+        let metered =
+            credits_from(&json!({"has_credits": true, "unlimited": false}), now()).unwrap();
+        assert!(metered.remaining.abs() < f64::EPSILON);
+        let numeric = credits_from(&json!({"balance": 4.25}), now()).unwrap();
+        assert!((numeric.remaining - 4.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn slugify_collapses_separators() {
+        assert_eq!(slugify("GPT-5.3 Codex__Spark!"), "gpt-5-3-codex-spark");
+        assert_eq!(slugify("---"), "");
+    }
+
+    #[test]
+    fn number_accepts_numbers_and_numeric_strings() {
+        assert_eq!(number(Some(&json!(3))), Some(3.0));
+        assert_eq!(number(Some(&json!(" 2.5 "))), Some(2.5));
+        assert_eq!(number(Some(&json!("x"))), None);
+        assert_eq!(number(Some(&json!(null))), None);
+        assert_eq!(number(None), None);
     }
 }
