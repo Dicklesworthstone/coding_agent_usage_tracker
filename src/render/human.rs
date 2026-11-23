@@ -424,17 +424,24 @@ pub fn render_cost(results: &[CostPayload], no_color: bool) -> Result<String> {
         };
         let mut content_lines: Vec<Vec<Segment>> = Vec::new();
 
+        // Claude's local scan reports token counts; Codex's counts session events.
+        let unit = if payload.provider == "claude" {
+            "tokens"
+        } else {
+            "messages"
+        };
+
         // Today's usage
         let today_text = match (payload.session_cost_usd, payload.session_tokens) {
             (Some(cost), Some(tokens)) => {
                 format!(
-                    "Today: ${:.2} \u{00B7} {} messages",
+                    "Today: ${:.2} \u{00B7} {} {unit}",
                     cost,
                     format_number(tokens)
                 )
             }
             (Some(cost), None) => format!("Today: ${cost:.2}"),
-            (None, Some(tokens)) => format!("Today: {} messages", format_number(tokens)),
+            (None, Some(tokens)) => format!("Today: {} {unit}", format_number(tokens)),
             (None, None) => "Today: No activity".to_string(),
         };
         content_lines.push(vec![Segment::plain(today_text)]);
@@ -443,13 +450,13 @@ pub fn render_cost(results: &[CostPayload], no_color: bool) -> Result<String> {
         let monthly_text = match (payload.last_30_days_cost_usd, payload.last_30_days_tokens) {
             (Some(cost), Some(tokens)) => {
                 format!(
-                    "Last 30 days: ${:.2} \u{00B7} {} messages",
+                    "Last 30 days: ${:.2} \u{00B7} {} {unit}",
                     cost,
                     format_number(tokens)
                 )
             }
             (Some(cost), None) => format!("Last 30 days: ${cost:.2}"),
-            (None, Some(tokens)) => format!("Last 30 days: {} messages", format_number(tokens)),
+            (None, Some(tokens)) => format!("Last 30 days: {} {unit}", format_number(tokens)),
             (None, None) => "Last 30 days: No activity".to_string(),
         };
         content_lines.push(vec![Segment::plain(monthly_text)]);

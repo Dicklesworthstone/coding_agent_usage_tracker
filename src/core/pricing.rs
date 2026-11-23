@@ -57,6 +57,13 @@ impl ModelPricing {
         }
     }
 
+    /// Cost per million 1-hour cache-write tokens: 2x base input on every Claude model
+    /// (the 5-minute write rate, 1.25x, is `cache_creation_per_million`).
+    #[must_use]
+    pub fn cache_write_1h_per_million(&self) -> f64 {
+        self.input_per_million * 2.0
+    }
+
     /// Calculate cost for given token counts.
     #[must_use]
     #[allow(clippy::cast_precision_loss)] // token counts fit within f64 precision
@@ -98,8 +105,68 @@ pub struct TokenCostBreakdown {
 pub struct PricingTable {
     /// Model name to pricing mapping (normalized lowercase).
     models: HashMap<String, ModelPricing>,
+    /// Higher rates a model charges when a request's prompt (input plus cache reads and
+    /// writes) is over a threshold: canonical model id -> (threshold tokens, pricing).
+    long_prompt: HashMap<String, (i64, ModelPricing)>,
     /// When this pricing data became effective.
     pub effective_date: DateTime<Utc>,
+}
+
+/// Token counts of one Claude API response, as its `usage` object reports them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResponseTokens {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    /// Cache writes with the 5-minute TTL (1.25x base input).
+    pub cache_write_5m: i64,
+    /// Cache writes with the 1-hour TTL (2x base input).
+    pub cache_write_1h: i64,
+    /// Served in fast mode (`usage.speed == "fast"`): 2x every token rate.
+    pub fast: bool,
+    /// Pinned to US-only inference (`usage.inference_geo == "us"`): 1.1x every token rate.
+    pub us_only_inference: bool,
+}
+
+impl ResponseTokens {
+    /// Every input-side token the request sent: what long-prompt pricing tiers count.
+    #[must_use]
+    pub const fn prompt_tokens(&self) -> i64 {
+        self.input + self.cache_read + self.cache_write_5m + self.cache_write_1h
+    }
+}
+
+/// Canonical form of a model id for pricing lookup.
+///
+/// Lowercases, drops a provider prefix (`anthropic.`, `us.anthropic.`), anything after a
+/// Vertex `@` snapshot, a `:` revision or a `[1m]` context tag, a Bedrock `-v1` suffix and a
+/// trailing `-YYYYMMDD` snapshot date, so `claude-opus-4-5-20251101`,
+/// `us.anthropic.claude-opus-4-5-20251101-v1:0` and `claude-opus-4-5@20251101` all price
+/// as `claude-opus-4-5`.
+#[must_use]
+pub fn canonical_model_id(model: &str) -> String {
+    let lower = model.trim().to_lowercase();
+    let mut id = lower.as_str();
+    if let Some(pos) = id.find("claude-") {
+        id = &id[pos..];
+    }
+    if let Some(pos) = id.find(['@', ':', '[']) {
+        id = &id[..pos];
+    }
+    if let Some((head, tail)) = id.rsplit_once('-')
+        && tail.len() > 1
+        && tail.starts_with('v')
+        && tail[1..].bytes().all(|b| b.is_ascii_digit())
+    {
+        id = head;
+    }
+    if let Some((head, tail)) = id.rsplit_once('-')
+        && tail.len() == 8
+        && tail.bytes().all(|b| b.is_ascii_digit())
+    {
+        id = head;
+    }
+    id.to_string()
 }
 
 impl Default for PricingTable {
@@ -109,26 +176,70 @@ impl Default for PricingTable {
 }
 
 impl PricingTable {
-    /// Create a pricing table with current (January 2026) pricing.
+    /// Create a pricing table with current pricing.
     ///
     /// Pricing sources:
-    /// - Anthropic: <https://www.anthropic.com/pricing>
+    /// - Anthropic (Claude API, first-party rates, November 2026):
+    ///   <https://platform.claude.com/docs/en/about-claude/pricing>
     /// - `OpenAI`: <https://openai.com/pricing>
+    ///
+    /// Claude entries are `(input, output, cache read, 5-minute cache write)` per million
+    /// tokens; a 1-hour cache write is 2x base input on every Claude model
+    /// ([`ModelPricing::cache_write_1h_per_million`]). Dated snapshots and provider-prefixed
+    /// ids resolve through [`canonical_model_id`].
     #[must_use]
+    #[allow(clippy::too_many_lines)] // one flat rate table reads best in one place
     pub fn current() -> Self {
         let mut models = HashMap::new();
+        let mut long_prompt = HashMap::new();
 
-        // Anthropic Claude models (as of Jan 2026)
-        // Claude Opus 4.5: $15/$75 per million
+        // Anthropic Claude models (November 2026).
+        for (model, input, output, cache_read, cache_write) in [
+            ("claude-fable-5-2", 8.0, 40.0, 0.20, 10.0),
+            ("claude-mythos-5-2", 8.0, 40.0, 0.20, 10.0),
+            ("claude-fable-5-1", 10.0, 50.0, 0.25, 12.5),
+            ("claude-mythos-5-1", 10.0, 50.0, 0.25, 12.5),
+            ("claude-fable-5", 10.0, 50.0, 1.0, 12.5),
+            ("claude-mythos-5", 10.0, 50.0, 1.0, 12.5),
+            ("claude-opus-5-5", 4.0, 20.0, 0.20, 5.0),
+            ("claude-opus-5", 5.0, 25.0, 0.50, 6.25),
+            ("claude-opus-4-8", 5.0, 25.0, 0.50, 6.25),
+            ("claude-opus-4-7", 5.0, 25.0, 0.50, 6.25),
+            ("claude-opus-4-6", 5.0, 25.0, 0.50, 6.25),
+            ("claude-opus-4-5", 5.0, 25.0, 0.50, 6.25),
+            ("claude-opus-4-1", 15.0, 75.0, 1.50, 18.75),
+            ("claude-opus-4", 15.0, 75.0, 1.50, 18.75),
+            ("claude-sonnet-5-5", 2.0, 10.0, 0.10, 2.5),
+            ("claude-sonnet-5", 2.0, 10.0, 0.20, 2.5),
+            ("claude-sonnet-4-6", 3.0, 15.0, 0.30, 3.75),
+            ("claude-sonnet-4-5", 3.0, 15.0, 0.30, 3.75),
+            // Claude Haiku 5.5, prompts up to 100,000 tokens (the long-prompt rates follow).
+            ("claude-haiku-5-5", 0.10, 0.50, 0.01, 0.125),
+            ("claude-haiku-4-5", 1.0, 5.0, 0.10, 1.25),
+        ] {
+            Self::add_model(&mut models, model, input, output, cache_read, cache_write);
+        }
+        // A Claude Haiku 5.5 request whose prompt is over 100,000 tokens pays these on
+        // every token of that request.
+        long_prompt.insert(
+            "claude-haiku-5-5".to_string(),
+            (
+                100_000,
+                ModelPricing::from_static("claude-haiku-5-5", 0.50, 2.50, 0.05, 0.625),
+            ),
+        );
+
+        // Claude Opus 4.5 aliases kept from earlier versions of this table ($5/$25)
         Self::add_model(
             &mut models,
             "claude-opus-4-5-20251101",
-            15.0,
-            75.0,
-            1.5,
-            18.75,
+            5.0,
+            25.0,
+            0.5,
+            6.25,
         );
-        Self::add_model(&mut models, "claude-opus-4.5", 15.0, 75.0, 1.5, 18.75);
+        Self::add_model(&mut models, "claude-opus-4.5", 5.0, 25.0, 0.5, 6.25);
+        // Claude Opus 4: $15/$75 per million
         Self::add_model(&mut models, "claude-4-opus", 15.0, 75.0, 1.5, 18.75);
 
         // Claude Sonnet 4: $3/$15 per million
@@ -235,6 +346,7 @@ impl PricingTable {
 
         Self {
             models,
+            long_prompt,
             effective_date: Utc::now(),
         }
     }
@@ -253,11 +365,46 @@ impl PricingTable {
 
     /// Look up pricing for a model by name.
     ///
-    /// Model names are normalized to lowercase for matching.
+    /// Model names are normalized to lowercase for matching; a name with no exact entry
+    /// is looked up again by its [`canonical_model_id`] (dated snapshots, provider prefixes).
     /// Returns None if the model is not in the pricing table.
     #[must_use]
     pub fn get(&self, model: &str) -> Option<&ModelPricing> {
-        self.models.get(&model.to_lowercase())
+        self.models
+            .get(&model.to_lowercase())
+            .or_else(|| self.models.get(&canonical_model_id(model)))
+    }
+
+    /// Pricing for one request with `prompt_tokens` of input (including cache reads and
+    /// writes): a model's long-prompt rates when the prompt is over its threshold.
+    #[must_use]
+    pub fn get_for_prompt(&self, model: &str, prompt_tokens: i64) -> Option<&ModelPricing> {
+        if let Some((threshold, pricing)) = self.long_prompt.get(&canonical_model_id(model))
+            && prompt_tokens > *threshold
+        {
+            return Some(pricing);
+        }
+        self.get(model)
+    }
+
+    /// API-rate cost in USD of one response, or `None` when the model is not priced.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)] // token counts fit within f64 precision
+    pub fn response_cost(&self, model: &str, tokens: &ResponseTokens) -> Option<f64> {
+        let pricing = self.get_for_prompt(model, tokens.prompt_tokens())?;
+        let rate = |count: i64, per_million: f64| count as f64 / 1_000_000.0 * per_million;
+        let mut cost = rate(tokens.input, pricing.input_per_million)
+            + rate(tokens.output, pricing.output_per_million)
+            + rate(tokens.cache_read, pricing.cache_read_per_million)
+            + rate(tokens.cache_write_5m, pricing.cache_creation_per_million)
+            + rate(tokens.cache_write_1h, pricing.cache_write_1h_per_million());
+        if tokens.fast {
+            cost *= 2.0;
+        }
+        if tokens.us_only_inference {
+            cost *= 1.1;
+        }
+        Some(cost)
     }
 
     /// Get pricing for a model, falling back to a conservative estimate.
@@ -596,6 +743,106 @@ mod tests {
 
         assert_eq!(cost.model, "unknown");
         assert!(!cost.model_known);
+    }
+
+    #[test]
+    fn canonical_model_id_strips_snapshots_and_provider_prefixes() {
+        for (raw, expected) in [
+            ("claude-opus-5-5", "claude-opus-5-5"),
+            ("claude-sonnet-4-5-20250929", "claude-sonnet-4-5"),
+            (
+                "us.anthropic.claude-opus-4-5-20251101-v1:0",
+                "claude-opus-4-5",
+            ),
+            (
+                "anthropic.claude-haiku-4-5-20251001-v1:0",
+                "claude-haiku-4-5",
+            ),
+            ("claude-opus-4-5@20251101", "claude-opus-4-5"),
+            ("claude-opus-4-6[1m]", "claude-opus-4-6"),
+            ("  Claude-Fable-5-2  ", "claude-fable-5-2"),
+            ("gpt-4o", "gpt-4o"),
+        ] {
+            assert_eq!(canonical_model_id(raw), expected, "{raw}");
+        }
+    }
+
+    #[test]
+    fn current_claude_models_are_priced_by_dated_and_prefixed_ids() {
+        let table = PricingTable::current();
+        let opus_55 = table.get("claude-opus-5-5").expect("Opus 5.5");
+        assert!((opus_55.input_per_million - 4.0).abs() < 1e-9);
+        assert!((opus_55.output_per_million - 20.0).abs() < 1e-9);
+        assert!((opus_55.cache_read_per_million - 0.20).abs() < 1e-9);
+
+        // Opus 4.5 is $5/$25, not the Opus 4.1 price.
+        let opus_45 = table
+            .get("us.anthropic.claude-opus-4-5-20251101-v1:0")
+            .expect("Opus 4.5 via Bedrock id");
+        assert!((opus_45.input_per_million - 5.0).abs() < 1e-9);
+        assert!((opus_45.output_per_million - 25.0).abs() < 1e-9);
+
+        let sonnet = table
+            .get("claude-sonnet-4-6-20260217")
+            .expect("dated Sonnet 4.6");
+        assert!((sonnet.output_per_million - 15.0).abs() < 1e-9);
+        assert!(table.get("claude-fable-5-2").is_some());
+        assert!(table.get("claude-haiku-5-5").is_some());
+    }
+
+    #[test]
+    fn response_cost_prices_cache_ttls_fast_mode_and_us_inference() {
+        let table = PricingTable::current();
+        let tokens = ResponseTokens {
+            input: 1_000_000,
+            output: 1_000_000,
+            cache_read: 1_000_000,
+            cache_write_5m: 1_000_000,
+            cache_write_1h: 1_000_000,
+            ..ResponseTokens::default()
+        };
+        // Opus 5.5: $4 + $20 + $0.20 + $5 + $8.
+        let base = table.response_cost("claude-opus-5-5", &tokens).unwrap();
+        assert!((base - 37.2).abs() < 1e-9, "{base}");
+
+        let fast = ResponseTokens {
+            fast: true,
+            ..tokens
+        };
+        let fast_cost = table.response_cost("claude-opus-5-5", &fast).unwrap();
+        assert!((fast_cost - 74.4).abs() < 1e-9, "{fast_cost}");
+
+        let us = ResponseTokens {
+            us_only_inference: true,
+            ..tokens
+        };
+        let us_cost = table.response_cost("claude-opus-5-5", &us).unwrap();
+        assert!((us_cost - 40.92).abs() < 1e-9, "{us_cost}");
+
+        assert!(table.response_cost("claude-imaginary-9", &tokens).is_none());
+    }
+
+    #[test]
+    fn haiku_5_5_long_prompts_use_the_higher_rates() {
+        let table = PricingTable::current();
+        let short = ResponseTokens {
+            input: 100_000,
+            output: 1_000,
+            ..ResponseTokens::default()
+        };
+        // 100,000 x $0.10 + 1,000 x $0.50 (per million).
+        let short_cost = table.response_cost("claude-haiku-5-5", &short).unwrap();
+        assert!((short_cost - 0.0105).abs() < 1e-12, "{short_cost}");
+
+        // One cache-read token tips the prompt over 100,000: every token pays the
+        // long-prompt rates ($0.50 input, $2.50 output, $0.05 cache read).
+        let long = ResponseTokens {
+            cache_read: 1,
+            ..short
+        };
+        let long_cost = table.response_cost("claude-haiku-5-5", &long).unwrap();
+        let expected = 100_000.0 * 0.50 / 1e6 + 1_000.0 * 2.50 / 1e6 + 0.05 / 1e6;
+        assert!((long_cost - expected).abs() < 1e-12, "{long_cost}");
     }
 
     #[test]
