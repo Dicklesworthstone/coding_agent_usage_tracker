@@ -187,3 +187,15 @@ The HTTP path is network-bound in real use.
 
 - `cargo clippy --all-targets -- -D warnings` (pinned nightly): clean.
 - `cargo test --no-fail-fast`: 1240 passed, 0 failed, 17 ignored, the same as the parent.
+
+## Major versions (one commit each, each gated the same way)
+
+- **base64 0.22 -> 0.23**: same `Engine` API; caut uses the general-purpose engines, not the
+  new SIMD ones. No source change.
+- **sha2 0.10 -> 0.11** (digest 0.11, MSRV 1.88): same `Digest` API. No source change.
+- **Held: jsonschema 0.63** (dev-dependency): it requires regex 1.13, and regex is held above.
+- **Held: keyring 4**: the crate was reorganised and the per-platform store features caut
+  enables (`apple-native`, `windows-native`, `linux-native`) are gone; porting changes
+  credential storage on macOS and Windows, which the Linux build machines cannot test.
+- **Held: rusqlite 0.40** (0.41+ needs Rust 1.89): SQLite access is a hot path with no
+  benchmark to compare against.
