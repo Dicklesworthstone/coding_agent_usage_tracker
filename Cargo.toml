@@ -70,7 +70,7 @@ futures = "0.3.32"
 rusqlite = "0.38.0"
 
 # Cryptography for credential hashing
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 base64 = "0.23"
 
