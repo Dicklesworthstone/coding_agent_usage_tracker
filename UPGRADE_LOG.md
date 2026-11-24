@@ -183,6 +183,12 @@ Run-to-run spread on the shared build machines was about 35% of the mean, and th
 the difference changes between machines, so no regression is detectable at that resolution.
 The HTTP path is network-bound in real use.
 
+Because CPU time is less sensitive than wall time to other jobs on a shared machine, the same
+two binaries were then run 21 more times each, alternately, on worker B, recording the process's
+user+system CPU time. The base median was 1.53 s and the candidate median 1.47 s. The median
+paired ratio was 0.987, and the candidate used less CPU in 11 of 21 pairs. Wall time in that
+pass: 1783 ms vs 1748 ms.
+
 ## Validation
 
 - `cargo clippy --all-targets -- -D warnings` (pinned nightly): clean.
