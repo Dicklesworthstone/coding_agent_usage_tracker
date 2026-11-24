@@ -72,7 +72,7 @@ rusqlite = "0.38.0"
 # Cryptography for credential hashing
 sha2 = "0.10"
 hex = "0.4"
-base64 = "0.22"
+base64 = "0.23"
 
 # Filesystem watching for credential daemon
 notify = "8.0"
